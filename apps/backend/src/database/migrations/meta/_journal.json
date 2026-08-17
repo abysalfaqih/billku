@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1781459606368,
+      "tag": "0000_adorable_harrier",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1781872863815,
+      "tag": "0001_thin_the_enforcers",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1783047597397,
+      "tag": "0002_violet_dormammu",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1784279572415,
+      "tag": "0003_same_ogun",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1785469463028,
+      "tag": "0004_funny_puck",
+      "breakpoints": true
+    }
+  ]
+}

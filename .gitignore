@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+frontend-build/
+catatan
+.pnp
+.pnp.js
+
+# Build output
+dist/
+.next/
+out/
+build/
+migration/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  --font-inter:       'Inter', system-ui, sans-serif;
+  --bg:               #F2F4F9;
+  --surface:          #FFFFFF;
+  --surface-2:        #F8F9FC;
+  --border:           rgba(0,0,0,0.08);
+  --border-strong:    rgba(0,0,0,0.16);
+  --text-1:           #111827;
+  --text-2:           #4B5563;
+  --text-3:           #9CA3AF;
+  --sidebar-bg:       #FFFFFF;
+  --sidebar-border:   rgba(0,0,0,0.08);
+  --sidebar-w:        220px;
+  --sidebar-w-sm:     56px;
+  --nav-hover:        rgba(0,0,0,0.05);
+  --nav-active-bg:    rgba(79,70,229,0.10);
+  --nav-active-text:  #4F46E5;
+  --nav-active-icon:  #4F46E5;
+  --topbar-bg:        #FFFFFF;
+  --topbar-border:    rgba(0,0,0,0.08);
+  --shadow-sm:        0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.05);
+  --shadow-md:        0 4px 16px rgba(0,0,0,0.08);
+  --input-bg:         rgba(0,0,0,0.04);
+  --input-border:     rgba(0,0,0,0.16);
+}
+
+html.dark {
+  --bg:               #0C0E14;
+  --surface:          #141823;
+  --surface-2:        #1A1F2E;
+  --border:           rgba(255,255,255,0.07);
+  --border-strong:    rgba(255,255,255,0.14);
+  --text-1:           #F0F4FF;
+  --text-2:           #94A3B8;
+  --text-3:           #4B5563;
+  --sidebar-bg:       #111318;
+  --sidebar-border:   rgba(255,255,255,0.05);
+  --nav-hover:        rgba(255,255,255,0.05);
+  --nav-active-bg:    rgba(99,102,241,0.20);
+  --nav-active-text:  #A5B4FC;
+  --nav-active-icon:  #818CF8;
+  --topbar-bg:        #111318;
+  --topbar-border:    rgba(255,255,255,0.05);
+  --shadow-sm:        0 1px 2px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.2);
+  --shadow-md:        0 4px 16px rgba(0,0,0,0.4);
+  --input-bg:         rgba(255,255,255,0.05);
+  --input-border:     rgba(255,255,255,0.14);
+}
+
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-inter, system-ui), -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+*:focus-visible {
+  outline: 2px solid var(--input-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.glass-card {
+  background: rgba(255,255,255,0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.6);
+}
+
+.dark .glass-card {
+  background: rgba(20,24,35,0.80);
+  border: 1px solid rgba(255,255,255,0.06);
+}
