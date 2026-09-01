@@ -62,9 +62,10 @@ export default function LoginPage() {
 
   return (
     <div style={{
-      minHeight: '100vh',
+      minHeight: '100dvh',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       position: 'relative',
+      padding: '24px 0',
       background: 'linear-gradient(145deg, #EEF2FF 0%, #F5F3FF 25%, #F0F4FF 55%, #F0F9FF 100%)',
     }}>
       {/* Soft gradient blobs via pseudo-background */}

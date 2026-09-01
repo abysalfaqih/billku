@@ -159,11 +159,7 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Row 1: Revenue + 4 stat cards */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2fr)',
-            gap: 16,
-          }}>
+          <div className="grid-hero">
             {/* Revenue card */}
             <RevenueCard
               total={Number(data?.revenue?.summary?.total ?? 0)}
@@ -171,11 +167,7 @@ export default function DashboardPage() {
             />
 
             {/* 2x2 stat grid */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-              gap: 16,
-            }}>
+            <div className="grid-stats-2">
               <StatCard
                 label="Pelanggan Aktif"
                 value={Number(activeCount).toLocaleString('id-ID')}
@@ -207,11 +199,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Row 2: Total pelanggan + Daily breakdown */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
-            gap: 16,
-          }}>
+          <div className="grid-stats-3">
             <StatCard
               label="Total Pelanggan"
               value={Number(totalCount).toLocaleString('id-ID')}

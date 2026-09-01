@@ -222,8 +222,11 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
         >
           <ArrowLeft size={14} /> Cari lain
         </button>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h2 style={{
+            fontSize: 16, fontWeight: 700, color: 'var(--text-1)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+          }}>
             {customer.name}
           </h2>
           <TypeBadge type={customer.connectionType} />
@@ -335,7 +338,7 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
 
           {/* Traffic (PPPoE only) */}
           {!isHotspot && trafficHistory.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="grid-stats-2">
               <div style={{ background: 'var(--surface)', borderRadius: 12, padding: 14, border: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                   <Download size={13} style={{ color: '#0EA5E9' }} />

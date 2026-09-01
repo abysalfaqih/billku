@@ -69,7 +69,7 @@ export function AssignDialog({ open, onClose }: AssignDialogProps) {
           options={planOptions} placeholder="Pilih paket..." required
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid-stats-2">
           <Input
             label="Durasi (bulan)" type="number" min="1" placeholder="1"
             value={form.durationMonths} onChange={set('durationMonths')} required

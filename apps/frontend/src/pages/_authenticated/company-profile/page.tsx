@@ -190,7 +190,7 @@ export default function CompanyProfilePage() {
           </div>
           <Input label="Nama Perusahaan" value={form.name} onChange={set('name')} required />
           <Input label="Motto / Slogan" placeholder="Membangun Kemandirian Desa..." value={form.motto} onChange={set('motto')} />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="grid-stats-2">
             <Input label="Email" type="email" value={form.email} onChange={set('email')} required />
             <Input label="Telepon / WhatsApp" value={form.phone} onChange={set('phone')} required />
           </div>
@@ -213,10 +213,16 @@ export default function CompanyProfilePage() {
           </div>
 
           {bankAccounts.map((b, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <Input label="Bank" placeholder="BRI" value={b.bankName} onChange={(e) => updateBank(i, 'bankName', e.target.value)} />
-              <Input label="No. Rekening" placeholder="123456789" value={b.accountNumber} onChange={(e) => updateBank(i, 'accountNumber', e.target.value)} />
-              <Input label="Atas Nama" placeholder="PT ..." value={b.accountName} onChange={(e) => updateBank(i, 'accountName', e.target.value)} />
+            <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                <Input label="Bank" placeholder="BRI" value={b.bankName} onChange={(e) => updateBank(i, 'bankName', e.target.value)} />
+              </div>
+              <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                <Input label="No. Rekening" placeholder="123456789" value={b.accountNumber} onChange={(e) => updateBank(i, 'accountNumber', e.target.value)} />
+              </div>
+              <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                <Input label="Atas Nama" placeholder="PT ..." value={b.accountName} onChange={(e) => updateBank(i, 'accountName', e.target.value)} />
+              </div>
               <button type="button" onClick={() => removeBank(i)} style={{
                 height: 40, width: 40, flexShrink: 0, background: 'var(--surface-2)', border: '1px solid var(--border)',
                 borderRadius: 10, cursor: 'pointer', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center',

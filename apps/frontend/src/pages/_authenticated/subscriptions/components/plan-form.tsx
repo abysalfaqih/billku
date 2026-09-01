@@ -109,7 +109,7 @@ export function PlanForm({ open, onClose, plan }: PlanFormProps) {
 
         <Section title="Batas Penggunaan" />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid-stats-2">
           <LimitInput
             label="Maks. Pelanggan"
             value={form.maxCustomers}

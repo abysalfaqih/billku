@@ -52,6 +52,14 @@ html.dark {
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html, body {
+  /* Safety net: stops any stray element from forcing the whole page to
+     scroll sideways on mobile. Inner tables/tabs still scroll via their
+     own overflowX where needed. */
+  overflow-x: hidden;
+  width: 100%;
+}
+
 body {
   font-family: var(--font-inter, system-ui), -apple-system, sans-serif;
   background: var(--bg);
@@ -59,6 +67,8 @@ body {
   -webkit-font-smoothing: antialiased;
   transition: background 0.2s ease, color 0.2s ease;
 }
+
+img, svg { max-width: 100%; }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -82,4 +92,42 @@ body {
 .dark .glass-card {
   background: rgba(20,24,35,0.80);
   border: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Responsive grid helpers ──────────────────────────────────────────────
+   Reusable breakpoints for fixed multi-column layouts (dashboard hero row,
+   stat-card grids, etc). Keeps the same visual layout on desktop while
+   collapsing gracefully on tablet/mobile instead of squeezing columns. */
+.grid-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+}
+
+.grid-stats-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.grid-stats-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.grid-2-1 {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .grid-hero { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .grid-stats-2,
+  .grid-stats-3,
+  .grid-2-1 { grid-template-columns: 1fr; }
 }

@@ -267,7 +267,8 @@ export default function CustomersPage() {
         }}>
           {/* Title row */}
           <div style={{
-            height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            minHeight: 60, padding: '10px 0', display: 'flex', flexWrap: 'wrap',
+            alignItems: 'center', justifyContent: 'space-between', gap: 10,
           }}>
             <div>
               <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>Pelanggan</h1>
@@ -275,7 +276,7 @@ export default function CustomersPage() {
                 {data?.meta.total ?? 0} total pelanggan terdaftar
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <Button size="sm" icon={<Plus size={14} />} onClick={openAdd}>
                 Tambah Pelanggan
               </Button>
@@ -334,7 +335,7 @@ export default function CustomersPage() {
         </div>
 
         {/* Table */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px 24px' }}>
+        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '0 24px 24px' }}>
           {isLoading ? (
             <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
               <Spinner size="lg" />
@@ -344,11 +345,12 @@ export default function CustomersPage() {
           ) : (
             <>
               <div style={{
-                background: 'var(--surface)', borderRadius: 16, overflow: 'hidden',
+                background: 'var(--surface)', borderRadius: 16,
                 border: '1px solid var(--border)', marginTop: 16,
                 boxShadow: 'var(--shadow-sm)',
+                overflowX: 'auto', WebkitOverflowScrolling: 'touch',
               }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       {['Pelanggan', 'Area', 'PPPoE', 'Tgl. Tagihan', 'Status', ''].map((h) => (

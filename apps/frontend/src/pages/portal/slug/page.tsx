@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api/v1';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4001/api/v1';
 
 const C = {
   primary: '#0052FF', // Professional Fintech Blue

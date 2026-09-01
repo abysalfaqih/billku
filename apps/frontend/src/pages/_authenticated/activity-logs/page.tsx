@@ -56,7 +56,7 @@ export default function ActivityLogsPage() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px 24px' }}>
         {isLoading ? (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
@@ -72,10 +72,11 @@ export default function ActivityLogsPage() {
         ) : (
           <>
             <div style={{
-              background: 'var(--surface)', borderRadius: 16, overflow: 'hidden',
+              background: 'var(--surface)', borderRadius: 16,
               border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+              overflowX: 'auto', WebkitOverflowScrolling: 'touch',
             }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', minWidth: 920, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                     {['Waktu', 'Pengguna', 'Aksi', 'Target', 'Method', 'IP Address', 'Status', 'Durasi', ''].map((h) => (

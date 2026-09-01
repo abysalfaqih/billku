@@ -101,7 +101,7 @@ function LiveSessionContent() {
                 {data.username} · IP {data.session?.address} · Uptime {data.session?.uptime}
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div className="grid-stats-2" style={{ marginBottom: 16 }}>
                 <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                     <Download size={14} style={{ color: '#0EA5E9' }} />

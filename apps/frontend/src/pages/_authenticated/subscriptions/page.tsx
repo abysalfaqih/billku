@@ -107,14 +107,14 @@ export default function SubscriptionsPage() {
   return (
     <>
       <div style={{ padding: '20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-1)' }}>Langganan Mitra</h1>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
               Kelola paket dan status berlangganan platform
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="outline" size="sm" icon={<Plus size={14} />} onClick={openAddPlan}>
               Buat Paket
             </Button>
@@ -159,10 +159,11 @@ export default function SubscriptionsPage() {
           </div>
         ) : (
           <div style={{
-            background: 'var(--surface)', borderRadius: 16, overflow: 'hidden',
+            background: 'var(--surface)', borderRadius: 16,
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+            overflowX: 'auto', WebkitOverflowScrolling: 'touch',
           }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', minWidth: 620, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                   {['Mitra', 'Paket', 'Status', 'Berakhir', 'Sisa Hari'].map((h) => (

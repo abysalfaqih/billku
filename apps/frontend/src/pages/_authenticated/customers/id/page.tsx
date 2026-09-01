@@ -188,7 +188,10 @@ export default function CustomerDetailPage() {
           flexShrink: 0, position: 'sticky', top: 0, zIndex: 10,
         }}>
           {/* Top bar */}
-          <div style={{ padding: '0 24px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{
+            padding: '10px 24px', minHeight: 52, display: 'flex', flexWrap: 'wrap',
+            alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          }}>
             <button
               onClick={() => navigate(-1)}
               style={{
@@ -199,7 +202,7 @@ export default function CustomerDetailPage() {
             >
               <ArrowLeft size={14} /> Kembali ke Pelanggan
             </button>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Button variant="outline" size="sm" icon={<Key size={13} />} onClick={() => setResetPassOpen(true)}>
                 Reset Password
               </Button>
@@ -244,7 +247,7 @@ export default function CustomerDetailPage() {
             </div>
 
             {/* Tabs */}
-            <div style={{ display: 'flex', gap: 0 }}>
+            <div style={{ display: 'flex', gap: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
               {[
                 { key: 'info', label: 'Info', icon: User },
                 { key: 'tagihan', label: `Tagihan (${activeBills.length})`, icon: FileText },
@@ -271,11 +274,11 @@ export default function CustomerDetailPage() {
         </div>
 
         {/* Scrollable content */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
           <div style={{ maxWidth: 700, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
             {/* Stats — tampil di semua tab */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div className="grid-stats-3">
               {[
                 { label: 'Total Dibayar', value: formatRp(totalPaid), sub: `${payments.length} transaksi`, color: '#10B981' },
                 { label: 'Tunggakan', value: formatRp(totalUnpaid), sub: totalUnpaid > 0 ? 'Perlu dibayar' : 'Tidak ada tunggakan', color: totalUnpaid > 0 ? '#EF4444' : 'var(--text-1)' },

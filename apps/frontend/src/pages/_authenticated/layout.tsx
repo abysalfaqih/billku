@@ -22,7 +22,7 @@ function LayoutInner() {
   if (!_hydrated) {
     return (
       <div style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'var(--bg)',
       }}>
         <div style={{
@@ -38,7 +38,7 @@ function LayoutInner() {
   if (!isAuthenticated) return null;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
+    <div style={{ display: 'flex', height: '100dvh', overflow: 'hidden', background: 'var(--bg)' }}>
       <BrandingSync />
       {open && (
         <div
@@ -57,7 +57,7 @@ function LayoutInner() {
       </div>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <TopNav />
-        <main style={{ flex: 1, overflow: 'auto' }}>
+        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minWidth: 0 }}>
           <Outlet />
         </main>
       </div>

@@ -39,7 +39,10 @@ export default function PaymentsPage() {
         background: 'var(--surface)', borderBottom: '1px solid var(--border)',
         padding: '0 24px', flexShrink: 0,
       }}>
-        <div style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{
+          minHeight: 60, padding: '10px 0', display: 'flex', flexWrap: 'wrap',
+          alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        }}>
           <div>
             <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>Riwayat Pembayaran</h1>
             <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>
@@ -53,7 +56,7 @@ export default function PaymentsPage() {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px 24px' }}>
         {isLoading ? (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
@@ -74,10 +77,11 @@ export default function PaymentsPage() {
         ) : (
           <>
             <div style={{
-              background: 'var(--surface)', borderRadius: 16, overflow: 'hidden',
+              background: 'var(--surface)', borderRadius: 16,
               border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+              overflowX: 'auto', WebkitOverflowScrolling: 'touch',
             }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                     {['Waktu', 'Pelanggan', 'Tagihan', 'Metode', 'Jumlah', 'Dicatat Oleh'].map((h) => (

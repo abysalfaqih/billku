@@ -82,7 +82,7 @@ export function PackageForm({ open, onClose, pkg }: PackageFormProps) {
           value={form.name} onChange={set('name')} required
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid-stats-2">
           <Input
             label="Kecepatan Download (Mbps)" type="number" min="1"
             placeholder="10" value={form.speedDownload} onChange={set('speedDownload')} required

@@ -47,10 +47,11 @@ export default function IpPoolsPage() {
           </div>
         ) : (
           <div style={{
-            background: 'var(--surface)', borderRadius: 16, overflow: 'hidden',
+            background: 'var(--surface)', borderRadius: 16,
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+            overflowX: 'auto', WebkitOverflowScrolling: 'touch',
           }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                   {['Nama', 'Network', 'Gateway', 'Range IP', 'Router', ''].map((h) => (

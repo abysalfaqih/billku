@@ -71,7 +71,7 @@ export function IpPoolForm({ open, onClose }: IpPoolFormProps) {
           hint="Gateway dan range IP akan dihitung otomatis"
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid-stats-2">
           <Input
             label="DNS Primary" value={form.dnsPrimary} onChange={set('dnsPrimary')}
           />

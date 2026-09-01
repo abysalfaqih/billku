@@ -116,9 +116,11 @@ export function Sidebar() {
 
   return (
     <aside style={{
+      position: 'relative',
       display: 'flex', flexDirection: 'column', height: '100%',
       background: 'var(--sidebar-bg)', borderRight: '1.5px solid var(--sidebar-border)',
       width: collapsed ? 'var(--sidebar-w-sm)' : 'var(--sidebar-w)',
+      maxWidth: '85vw',
       transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       boxShadow: '2px 0 8px rgba(0,0,0,0.04)',
     }}>

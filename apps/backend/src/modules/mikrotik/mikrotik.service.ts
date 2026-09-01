@@ -192,6 +192,36 @@ export class MikrotikService {
     }
   }
 
+  async deletePppoeSecret(config: MikrotikConnection, username: string): Promise<void> {
+    await this.withConnectionSafe(config, async (api) => {
+      // Putus sesi aktif dulu — supaya koneksi internet berhenti seketika,
+      // sebelum secret-nya sendiri dihapus.
+      try {
+        const active = await api.write('/ppp/active/print', [`?name=${username}`]);
+        for (const s of active) {
+          await api.write('/ppp/active/remove', [`=.id=${s['.id']}`]).catch(() => {});
+        }
+        if (active.length > 0) {
+          this.logger.log(`🔴 Mikrotik: ${active.length} sesi PPPoE '${username}' diputus`);
+        }
+      } catch { /* ok */ }
+
+      // Hapus secret-nya
+      try {
+        const secrets = await api.write('/ppp/secret/print', [`?name=${username}`]);
+        if (secrets.length > 0) {
+          await api.write('/ppp/secret/remove', [`=.id=${secrets[0]['.id']}`]).catch((err: any) => {
+            if (err?.errno !== 'UNKNOWNREPLY') throw err;
+          });
+          this.logger.log(`🗑️ Mikrotik: PPPoE secret '${username}' dihapus`);
+        }
+      } catch (err: any) {
+        if (err?.errno !== 'UNKNOWNREPLY') throw err;
+      }
+      return null;
+    }, null);
+  }
+
   // ─── PPPoE Active Session ──────────────────────────────────────────────────
 
   async kickSession(config: MikrotikConnection, username: string): Promise<boolean> {

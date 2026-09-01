@@ -5,7 +5,7 @@ import { eq, and, like, or, count, desc, isNotNull } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { customers, packages, ipPools, mikrotikConfigs, areas, bills, payments } from '../../database/schema';
+import { customers, packages, ipPools, mikrotikConfigs, areas, bills, payments, whatsappLogs } from '../../database/schema';
 import { RadiusService } from '../radius/radius.service';
 import { MikrotikService } from '../mikrotik/mikrotik.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -328,24 +328,61 @@ export class CustomersService {
   async remove(id: number, user: AuthUser) {
     const customer = await this.findOne(id, user);
 
+    // ── 1. Putus akses jaringan SEKARANG JUGA ──────────────────────────────
+    // Best-effort: kalau router/RADIUS lagi tidak bisa dihubungi, tetap lanjut
+    // ke penghapusan data (jangan sampai router down membuat data pelanggan
+    // yang harusnya dihapus malah nyangkut selamanya). Errornya di-log saja.
     if (customer.connectionType === 'hotspot') {
-      const mtk = await this.getHotspotMikrotikConfig(customer);
-      if (mtk && customer.usernamePppoe) {
-        await this.mikrotikService.deleteHotspotUser(mtk, customer.usernamePppoe);
-      }
-    } else {
       if (customer.usernamePppoe) {
+        const mtk = await this.getHotspotMikrotikConfig(customer);
+        if (mtk) {
+          try {
+            await this.mikrotikService.deleteHotspotUser(mtk, customer.usernamePppoe);
+          } catch (err) {
+            this.logger.error(`Gagal hapus Mikrotik Hotspot user '${customer.usernamePppoe}': ${err}`);
+          }
+        }
+      }
+    } else if (customer.usernamePppoe) {
+      try {
         await this.radiusService.deleteUser(customer.usernamePppoe);
-        await this.kickCustomerSession(customer);
+      } catch (err) {
+        this.logger.error(`Gagal hapus RADIUS user '${customer.usernamePppoe}': ${err}`);
+      }
+      await this.kickCustomerSession(customer); // sudah self-catch di dalam
+
+      try {
+        const mtk = await this.getPppoeMikrotikConfig(customer);
+        if (mtk) await this.mikrotikService.deletePppoeSecret(mtk, customer.usernamePppoe);
+      } catch (err) {
+        this.logger.error(`Gagal hapus Mikrotik PPPoE secret '${customer.usernamePppoe}': ${err}`);
       }
     }
 
-    await this.db
-      .update(customers)
-      .set({ status: 'terminated', updatedAt: new Date() })
-      .where(and(eq(customers.id, id), eq(customers.tenantId, user.tenantId)));
+    // ── 2. Hapus permanen dari database ────────────────────────────────────
+    // Transaksi: semua-atau-tidak-sama-sekali. Urutan mengikuti arah foreign
+    // key (payments → bills, whatsapp_logs → bills/customers, lalu customers)
+    // supaya tidak menabrak constraint.
+    await this.db.transaction(async (tx) => {
+      await tx.delete(payments)
+        .where(and(eq(payments.customerId, id), eq(payments.tenantId, user.tenantId)));
 
-    return { message: 'Pelanggan berhasil dihapus' };
+      await tx.delete(whatsappLogs)
+        .where(and(eq(whatsappLogs.customerId, id), eq(whatsappLogs.tenantId, user.tenantId)));
+
+      await tx.delete(bills)
+        .where(and(eq(bills.customerId, id), eq(bills.tenantId, user.tenantId)));
+
+      await tx.delete(customers)
+        .where(and(eq(customers.id, id), eq(customers.tenantId, user.tenantId)));
+    });
+
+    this.logger.log(
+      `🗑️ Pelanggan #${id} '${customer.name}' dihapus permanen beserta seluruh ` +
+      `tagihan & pembayaran terkait (mempengaruhi laporan pendapatan)`,
+    );
+
+    return { message: 'Pelanggan beserta seluruh data terkait (tagihan, pembayaran) berhasil dihapus permanen' };
   }
 
   // ─── Export CSV ────────────────────────────────────────────────────────────

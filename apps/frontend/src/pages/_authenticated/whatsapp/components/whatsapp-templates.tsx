@@ -121,9 +121,7 @@ function TemplateCard({ template }: { template: WhatsappTemplate }) {
         ))}
       </div>
 
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) minmax(240px, 1fr)', gap: 16,
-      }}>
+      <div className="grid-stats-2">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>TEMPLATE</span>
           <textarea

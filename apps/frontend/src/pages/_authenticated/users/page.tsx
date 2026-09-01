@@ -25,7 +25,7 @@ function UsersContent() {
 
   return (
     <div style={{ padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-1)' }}>Pengguna</h1>
           <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
@@ -55,10 +55,11 @@ function UsersContent() {
         </div>
       ) : (
         <div style={{
-          background: 'var(--surface)', borderRadius: 16, overflow: 'hidden',
+          background: 'var(--surface)', borderRadius: 16,
           border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch',
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                 {['Nama', 'Email', 'Role', 'Login Terakhir', 'Status', ''].map((h) => (

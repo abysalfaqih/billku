@@ -80,7 +80,7 @@ export function MikrotikForm({ open, onClose, config }: MikrotikFormProps) {
           value={form.name} onChange={set('name')} required
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+        <div className="grid-2-1">
           <Input
             label="IP Address" placeholder="192.168.1.1"
             value={form.host} onChange={set('host')} required

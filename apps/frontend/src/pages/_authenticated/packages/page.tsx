@@ -98,7 +98,7 @@ export default function PackagesPage() {
     <>
       <div style={{ padding: '20px 24px', maxWidth: '100%' }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 24 }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-1)' }}>Paket Internet</h1>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>

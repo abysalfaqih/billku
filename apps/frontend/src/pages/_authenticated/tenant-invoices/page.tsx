@@ -79,11 +79,12 @@ function CreateInvoiceDialog({
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 200,
+      position: 'fixed', inset: 0, zIndex: 200, padding: 16,
       background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
         background: 'var(--surface)', borderRadius: 18, padding: 24, width: '100%', maxWidth: 480,
+        maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box',
         boxShadow: '0 24px 64px rgba(0,0,0,0.2)',
       }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>
@@ -165,7 +166,7 @@ function CreateInvoiceDialog({
           </div>
 
           {/* Authorized */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="grid-stats-2">
             <div>
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>
                 Ditandatangani Oleh
@@ -241,7 +242,7 @@ export default function TenantInvoicesPage() {
   return (
     <>
       <div style={{ padding: '20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 24 }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-1)' }}>Invoice Mitra</h1>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
@@ -264,8 +265,11 @@ export default function TenantInvoicesPage() {
             </Button>
           </div>
         ) : (
-          <div style={{ background: 'var(--surface)', borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)',
+            overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+          }}>
+            <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                   {['No. Invoice', 'Mitra', 'Periode', 'Total', 'Status', ''].map(h => (
