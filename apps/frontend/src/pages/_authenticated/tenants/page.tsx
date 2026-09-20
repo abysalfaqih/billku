@@ -1,16 +1,24 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Building2, Power, UserCog } from 'lucide-react';
+import { Plus, Building2, Power, UserCog, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
 import { TenantForm } from './components/tenant-form';
+import { DeleteTenantDialog } from './components/delete-tenant-dialog';
 import { useTenants, useToggleTenantActive } from '@/hooks/useTenants';
+import type { Tenant } from '@/types';
 
 export default function TenantsPage() {
   const { data: tenants, isLoading } = useTenants();
   const toggleActive = useToggleTenantActive();
   const [formOpen, setFormOpen] = useState(false);
+  const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null);
+
+  const openAdd = () => { setEditingTenant(null); setFormOpen(true); };
+  const openEdit = (t: Tenant) => { setEditingTenant(t); setFormOpen(true); };
+  const closeForm = () => { setFormOpen(false); setEditingTenant(null); };
 
   return (
     <>
@@ -22,7 +30,7 @@ export default function TenantsPage() {
               {tenants?.length ?? 0} mitra terdaftar di platform
             </p>
           </div>
-          <Button size="sm" icon={<Plus size={14} />} onClick={() => setFormOpen(true)}>
+          <Button size="sm" icon={<Plus size={14} />} onClick={openAdd}>
             Tambah Mitra
           </Button>
         </div>
@@ -41,7 +49,7 @@ export default function TenantsPage() {
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
               Daftarkan mitra pertama untuk mulai berlangganan
             </p>
-            <Button size="sm" icon={<Plus size={14} />} onClick={() => setFormOpen(true)} style={{ marginTop: 16 }}>
+            <Button size="sm" icon={<Plus size={14} />} onClick={openAdd} style={{ marginTop: 16 }}>
               Tambah Mitra
             </Button>
           </div>
@@ -97,7 +105,7 @@ export default function TenantsPage() {
                       </Badge>
                     </td>
                     <td style={{ padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <Link
                           to={`/users?tenantId=${t.id}`}
                           style={{
@@ -110,6 +118,18 @@ export default function TenantsPage() {
                           <UserCog size={12} /> Pengguna
                         </Link>
                         <button
+                          onClick={() => openEdit(t)}
+                          title="Edit mitra"
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                            background: 'var(--surface-2)', cursor: 'pointer',
+                            fontSize: 12, color: 'var(--text-2)',
+                          }}
+                        >
+                          <Pencil size={12} /> Edit
+                        </button>
+                        <button
                           onClick={() => toggleActive.mutate(t.id)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 4,
@@ -119,6 +139,18 @@ export default function TenantsPage() {
                           }}
                         >
                           <Power size={12} /> {t.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(t)}
+                          title="Hapus mitra permanen"
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                            background: 'var(--surface-2)', cursor: 'pointer',
+                            fontSize: 12, color: '#EF4444',
+                          }}
+                        >
+                          <Trash2 size={12} /> Hapus
                         </button>
                       </div>
                     </td>
@@ -130,7 +162,12 @@ export default function TenantsPage() {
         )}
       </div>
 
-      <TenantForm open={formOpen} onClose={() => setFormOpen(false)} />
+      <TenantForm open={formOpen} onClose={closeForm} tenant={editingTenant} />
+      <DeleteTenantDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        tenant={deleteTarget}
+      />
     </>
   );
 }

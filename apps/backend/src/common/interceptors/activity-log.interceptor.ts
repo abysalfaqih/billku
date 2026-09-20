@@ -47,19 +47,27 @@ const ACTION_MAP: Array<[RegExp, string]> = [
   [/^POST \/tenants\/me\/profile\/logo$/, 'Ubah Logo Tenant'],
   [/^POST \/tenants\/me\/profile\/favicon$/, 'Ubah Favicon Tenant'],
   [/^PUT \/tenants\/[\w-]+\/toggle-active$/, 'Aktifkan/Nonaktifkan Tenant'],
+  [/^PUT \/tenants\/[\w-]+$/, 'Edit Data Mitra'],
+  [
+    /^DELETE \/tenants\/[\w-]+$/,
+    'Hapus Mitra (Permanen, Termasuk Seluruh Data Terkait)',
+  ],
 
   // ── Paket langganan SaaS & tagihan antar-tenant (sensitif — finansial) ──
   [/^POST \/subscription-plans$/, 'Tambah Paket Langganan'],
   [/^PUT \/subscription-plans\/\d+$/, 'Edit Paket Langganan'],
   [/^DELETE \/subscription-plans\/\d+$/, 'Hapus Paket Langganan'],
-  [/^POST \/tenant-subscriptions$/, 'Tambah Langganan Tenant'],
+  [/^POST \/tenant-subscriptions$/, 'Tambah/Ganti Langganan Tenant'],
+  [/^PUT \/tenant-subscriptions\/\d+$/, 'Edit Langganan Tenant'],
   [/^DELETE \/tenant-subscriptions\/\d+$/, 'Hapus Langganan Tenant'],
   [/^POST \/tenant-invoices$/, 'Buat Invoice Tenant'],
   [
     /^POST \/tenant-invoices\/[\w-]+\/auto-bandwidth$/,
     'Generate Invoice Bandwidth Otomatis',
   ],
+  [/^PUT \/tenant-invoices\/\d+$/, 'Edit Invoice Tenant'],
   [/^PUT \/tenant-invoices\/\d+\/status$/, 'Ubah Status Invoice Tenant'],
+  [/^DELETE \/tenant-invoices\/\d+$/, 'Hapus Invoice Tenant'],
 
   [/^POST \/areas$/, 'Tambah Area'],
   [/^DELETE \/areas\/\d+$/, 'Hapus Area'],

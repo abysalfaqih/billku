@@ -186,6 +186,13 @@ export interface Tenant {
   phone: string;
   address: string | null;
   logoUrl: string | null;
+  faviconUrl: string | null;
+  motto: string | null;
+  about: string | null;
+  bandwidthEnabled: boolean;
+  bandwidthDescription: string | null;
+  bandwidthPriceMonthly: string | null;
+  bankAccounts: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

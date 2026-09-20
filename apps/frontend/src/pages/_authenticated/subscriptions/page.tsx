@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { Plus, Layers, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Layers, Edit2, Trash2, RefreshCw, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { AssignDialog } from './components/assign-dialog';
+import type { AssignDialogPreset } from './components/assign-dialog';
+import { EditSubscriptionDialog } from './components/edit-subscription-dialog';
 import { PlanForm } from './components/plan-form';
 import {
   useTenantSubscriptions, useSubscriptionPlans, useDeletePlan,
 } from '@/hooks/useSubscriptions';
-import type { SubscriptionPlan } from '@/types';
+import type { SubscriptionPlan, TenantSubscriptionRow } from '@/types';
 
 function formatDate(d: string | null) {
   if (!d) return '—';
@@ -95,6 +97,8 @@ export default function SubscriptionsPage() {
   const deletePlan = useDeletePlan();
 
   const [assignOpen, setAssignOpen] = useState(false);
+  const [changePlanTarget, setChangePlanTarget] = useState<TenantSubscriptionRow | null>(null);
+  const [editTarget, setEditTarget] = useState<TenantSubscriptionRow | null>(null);
   const [planFormOpen, setPlanFormOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SubscriptionPlan | null>(null);
@@ -103,6 +107,21 @@ export default function SubscriptionsPage() {
 
   const openAddPlan = () => { setSelectedPlan(null); setPlanFormOpen(true); };
   const openEditPlan = (p: SubscriptionPlan) => { setSelectedPlan(p); setPlanFormOpen(true); };
+
+  // Dialog "Aktifkan Langganan" (tombol atas, mitra bebas dipilih) dan
+  // "Ganti Paket" (tombol per-baris, mitra terkunci) memakai komponen yang
+  // sama — hanya beda ada/tidaknya `preset`.
+  const assignDialogOpen = assignOpen || !!changePlanTarget;
+  const assignPreset: AssignDialogPreset | null = changePlanTarget
+    ? {
+      tenantId: changePlanTarget.tenantId,
+      tenantName: changePlanTarget.tenantName,
+      planId: changePlanTarget.planId,
+      durationMonths: changePlanTarget.durationMonths,
+      amountPaid: changePlanTarget.amountPaid,
+    }
+    : null;
+  const closeAssignDialog = () => { setAssignOpen(false); setChangePlanTarget(null); };
 
   return (
     <>
@@ -163,10 +182,10 @@ export default function SubscriptionsPage() {
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
             overflowX: 'auto', WebkitOverflowScrolling: 'touch',
           }}>
-            <table style={{ width: '100%', minWidth: 620, borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                  {['Mitra', 'Paket', 'Status', 'Berakhir', 'Sisa Hari'].map((h) => (
+                  {['Mitra', 'Paket', 'Status', 'Berakhir', 'Sisa Hari', ''].map((h) => (
                     <th key={h} style={{
                       padding: '10px 16px', textAlign: 'left', fontSize: 11,
                       fontWeight: 700, color: 'var(--text-3)', letterSpacing: '0.05em',
@@ -209,6 +228,36 @@ export default function SubscriptionsPage() {
                           </span>
                         )}
                       </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => setChangePlanTarget(row)}
+                            title="Ganti paket langganan mitra ini"
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                              background: 'var(--surface-2)', cursor: 'pointer',
+                              fontSize: 12, color: 'var(--text-2)',
+                            }}
+                          >
+                            <RefreshCw size={12} /> {row.subscriptionId ? 'Ganti Paket' : 'Aktifkan'}
+                          </button>
+                          {row.subscriptionId && (
+                            <button
+                              onClick={() => setEditTarget(row)}
+                              title="Koreksi data langganan ini"
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                                background: 'var(--surface-2)', cursor: 'pointer',
+                                fontSize: 12, color: 'var(--text-2)',
+                              }}
+                            >
+                              <Pencil size={12} /> Koreksi
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -218,7 +267,13 @@ export default function SubscriptionsPage() {
         )}
       </div>
 
-      <AssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} />
+      <AssignDialog open={assignDialogOpen} onClose={closeAssignDialog} preset={assignPreset} />
+
+      <EditSubscriptionDialog
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        row={editTarget}
+      />
 
       <PlanForm
         open={planFormOpen}

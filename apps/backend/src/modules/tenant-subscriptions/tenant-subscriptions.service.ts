@@ -1,15 +1,15 @@
-import {
-  Injectable,
-  Inject,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { eq, and, count, desc, sql } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { tenantSubscriptions, subscriptionPlans, tenants } from '../../database/schema';
+import {
+  tenantSubscriptions,
+  subscriptionPlans,
+  tenants,
+} from '../../database/schema';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dto';
+import type { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
 
 @Injectable()
 export class TenantSubscriptionsService {
@@ -130,6 +130,44 @@ export class TenantSubscriptionsService {
       .limit(1);
 
     return active ?? null;
+  }
+
+  // Koreksi record langganan yang sudah ada (bukan mengganti paket dengan
+  // riwayat baru — untuk itu pakai create()). Kalau planId tidak valid,
+  // langsung 404. Kalau durationMonths ikut diubah, expiresAt dihitung ulang
+  // dari startedAt yang sudah tersimpan (tanggal mulai tidak direset).
+  async update(id: number, dto: UpdateTenantSubscriptionDto) {
+    const existing = await this.findOne(id);
+
+    if (dto.planId !== undefined) {
+      const [plan] = await this.db
+        .select({ id: subscriptionPlans.id })
+        .from(subscriptionPlans)
+        .where(eq(subscriptionPlans.id, dto.planId))
+        .limit(1);
+      if (!plan) throw new NotFoundException('Paket langganan tidak ditemukan');
+    }
+
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    if (dto.planId !== undefined) updateData.planId = dto.planId;
+    if (dto.status !== undefined) updateData.status = dto.status;
+    if (dto.amountPaid !== undefined)
+      updateData.amountPaid = String(dto.amountPaid);
+    if (dto.notes !== undefined) updateData.notes = dto.notes;
+
+    if (dto.durationMonths !== undefined) {
+      updateData.durationMonths = dto.durationMonths;
+      const expiresAt = new Date(existing.startedAt);
+      expiresAt.setMonth(expiresAt.getMonth() + dto.durationMonths);
+      updateData.expiresAt = expiresAt;
+    }
+
+    await this.db
+      .update(tenantSubscriptions)
+      .set(updateData)
+      .where(eq(tenantSubscriptions.id, id));
+
+    return this.findOne(id);
   }
 
   async cancel(id: number) {

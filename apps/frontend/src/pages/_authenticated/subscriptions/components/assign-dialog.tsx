@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { SelectInput } from '@/components/ui/select-input';
 import { Input } from '@/components/ui/input';
@@ -6,21 +6,51 @@ import { Button } from '@/components/ui/button';
 import { useAssignSubscription, useSubscriptionPlans } from '@/hooks/useSubscriptions';
 import { useTenants } from '@/hooks/useTenants';
 
+export interface AssignDialogPreset {
+  tenantId: string;
+  tenantName: string;
+  planId?: number | null;
+  durationMonths?: number | null;
+  amountPaid?: string | null;
+}
+
 interface AssignDialogProps {
   open: boolean;
   onClose: () => void;
+  // Kalau diisi, dialog terbuka dalam mode "Ganti Paket" untuk satu mitra
+  // tertentu — pilihan mitra otomatis terkunci ke mitra tersebut supaya tidak
+  // salah pilih, dan form diisi awal dari langganannya yang sedang berjalan.
+  preset?: AssignDialogPreset | null;
 }
 
-export function AssignDialog({ open, onClose }: AssignDialogProps) {
+const EMPTY_FORM = { tenantId: '', planId: '', durationMonths: '1', amountPaid: '', notes: '' };
+
+export function AssignDialog({ open, onClose, preset }: AssignDialogProps) {
   const { data: tenants } = useTenants();
   const { data: plans } = useSubscriptionPlans();
-  const [form, setForm] = useState({
-    tenantId: '', planId: '', durationMonths: '1', amountPaid: '', notes: '',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const isChangePlan = !!preset;
+
   const assign = useAssignSubscription(() => {
     onClose();
-    setForm({ tenantId: '', planId: '', durationMonths: '1', amountPaid: '', notes: '' });
+    setForm(EMPTY_FORM);
   });
+
+  // Setiap dialog dibuka: isi dari preset (mode ganti paket) atau kosongkan (mode bebas pilih mitra).
+  useEffect(() => {
+    if (!open) return;
+    if (preset) {
+      setForm({
+        tenantId: preset.tenantId,
+        planId: preset.planId ? String(preset.planId) : '',
+        durationMonths: preset.durationMonths ? String(preset.durationMonths) : '1',
+        amountPaid: preset.amountPaid ? String(Number(preset.amountPaid)) : '',
+        notes: '',
+      });
+    } else {
+      setForm(EMPTY_FORM);
+    }
+  }, [open, preset]);
 
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -48,21 +78,29 @@ export function AssignDialog({ open, onClose }: AssignDialogProps) {
     <Dialog
       open={open}
       onClose={onClose}
-      title="Aktifkan Langganan"
-      subtitle="Berikan akses paket ke mitra"
+      title={isChangePlan ? 'Ganti Paket Mitra' : 'Aktifkan Langganan'}
+      subtitle={isChangePlan
+        ? `Perbarui paket langganan untuk ${preset?.tenantName}`
+        : 'Berikan akses paket ke mitra'}
       size="md"
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose} disabled={assign.isPending}>Batal</Button>
-          <Button size="sm" loading={assign.isPending} onClick={handleSubmit as any}>Aktifkan</Button>
+          <Button size="sm" loading={assign.isPending} onClick={handleSubmit as any}>
+            {isChangePlan ? 'Ganti Paket' : 'Aktifkan'}
+          </Button>
         </>
       }
     >
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <SelectInput
-          label="Mitra" value={form.tenantId} onChange={set('tenantId')}
-          options={tenantOptions} placeholder="Pilih mitra..." required
-        />
+        {isChangePlan ? (
+          <Input label="Mitra" value={preset?.tenantName ?? ''} disabled readOnly />
+        ) : (
+          <SelectInput
+            label="Mitra" value={form.tenantId} onChange={set('tenantId')}
+            options={tenantOptions} placeholder="Pilih mitra..." required
+          />
+        )}
 
         <SelectInput
           label="Paket Langganan" value={form.planId} onChange={set('planId')}
@@ -84,6 +122,13 @@ export function AssignDialog({ open, onClose }: AssignDialogProps) {
           label="Catatan (opsional)" placeholder="contoh: bayar via transfer"
           value={form.notes} onChange={set('notes')}
         />
+
+        {isChangePlan && (
+          <p style={{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            Langganan yang sedang aktif akan otomatis ditandai "Dibatalkan" dan digantikan
+            langganan baru ini — riwayat langganan sebelumnya tetap tersimpan.
+          </p>
+        )}
 
         <button type="submit" style={{ display: 'none' }} />
       </form>
