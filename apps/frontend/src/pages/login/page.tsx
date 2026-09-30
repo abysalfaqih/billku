@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Building2 } from 'lucide-react';
 import { useLogin } from '@/hooks/useAuth';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { useTheme } from '@/lib/theme-provider';
 
 function Field({
   label, type = 'text', placeholder, value, onChange, icon: Icon,
@@ -53,6 +54,8 @@ function Field({
 
 export default function LoginPage() {
   const login = useLogin();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [form, setForm] = useState({ tenantSlug: '', email: '', password: '' });
   const [showPass, setShowPass] = useState(false);
 
@@ -60,20 +63,34 @@ export default function LoginPage() {
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((p) => ({ ...p, [k]: e.target.value }));
 
+  const pageBg = isDark
+    ? 'linear-gradient(145deg, #0A0B10 0%, #10101C 25%, #0D1220 55%, #0A1018 100%)'
+    : 'linear-gradient(145deg, #EEF2FF 0%, #F5F3FF 25%, #F0F4FF 55%, #F0F9FF 100%)';
+  const blobGradient = isDark
+    ? 'radial-gradient(ellipse 60% 50% at 15% 40%, rgba(99,102,241,0.20) 0%, transparent 100%), '
+      + 'radial-gradient(ellipse 50% 40% at 85% 65%, rgba(168,85,247,0.16) 0%, transparent 100%)'
+    : 'radial-gradient(ellipse 60% 50% at 15% 40%, rgba(165,180,252,0.25) 0%, transparent 100%), '
+      + 'radial-gradient(ellipse 50% 40% at 85% 65%, rgba(196,181,253,0.20) 0%, transparent 100%)';
+  const cardBg = isDark ? 'rgba(20,24,35,0.85)' : 'rgba(255,255,255,0.92)';
+  const cardBorder = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(255,255,255,0.8)';
+  const cardShadow = isDark
+    ? '0 8px 40px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)'
+    : '0 8px 40px rgba(99,102,241,0.12), 0 2px 8px rgba(0,0,0,0.06)';
+  const logoShadow = isDark ? '0 4px 14px rgba(0,0,0,0.45)' : '0 4px 14px rgba(0,0,0,0.07)';
+  const footerBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(249,250,251,0.8)';
+
   return (
     <div style={{
       minHeight: '100dvh',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       position: 'relative',
       padding: '24px 0',
-      background: 'linear-gradient(145deg, #EEF2FF 0%, #F5F3FF 25%, #F0F4FF 55%, #F0F9FF 100%)',
+      background: pageBg,
     }}>
       {/* Soft gradient blobs via pseudo-background */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
-        background:
-          'radial-gradient(ellipse 60% 50% at 15% 40%, rgba(165,180,252,0.25) 0%, transparent 100%), ' +
-          'radial-gradient(ellipse 50% 40% at 85% 65%, rgba(196,181,253,0.20) 0%, transparent 100%)',
+        background: blobGradient,
       }} />
 
       {/* Theme toggle */}
@@ -84,12 +101,12 @@ export default function LoginPage() {
       {/* Card */}
       <div style={{
         width: '100%', maxWidth: 400, margin: '0 16px',
-        background: 'rgba(255,255,255,0.92)',
+        background: cardBg,
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.8)',
+        border: cardBorder,
         borderRadius: 24,
-        boxShadow: '0 8px 40px rgba(99,102,241,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+        boxShadow: cardShadow,
         overflow: 'hidden',
       }}>
         <div style={{ padding: '36px 36px 28px' }}>
@@ -100,7 +117,7 @@ export default function LoginPage() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: '#FFFFFF',
               border: '1px solid rgba(0,0,0,0.06)',
-              boxShadow: '0 4px 14px rgba(0,0,0,0.07)',
+              boxShadow: logoShadow,
               overflow: 'hidden',
             }}>
               <img
@@ -111,10 +128,10 @@ export default function LoginPage() {
                 style={{ objectFit: 'contain' }}
               />
             </div>
-            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#111827', letterSpacing: '-0.02em' }}>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
               BillingKU
             </h1>
-            <p style={{ fontSize: 14, color: '#6B7280', marginTop: 4 }}>
+            <p style={{ fontSize: 14, color: 'var(--text-2)', marginTop: 4 }}>
               Masuk ke dashboard Anda
             </p>
           </div>
@@ -141,7 +158,7 @@ export default function LoginPage() {
               icon={Lock} required
               rightElement={
                 <button type="button" onClick={() => setShowPass(p => !p)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#9CA3AF', display: 'flex' }}>
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-3)', display: 'flex' }}>
                   {showPass ? <EyeOff size={15} strokeWidth={1.75} /> : <Eye size={15} strokeWidth={1.75} />}
                 </button>
               }
@@ -180,8 +197,8 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div style={{
-          padding: '14px 36px', textAlign: 'center', fontSize: 12, color: '#9CA3AF',
-          borderTop: '1px solid rgba(0,0,0,0.06)', background: 'rgba(249,250,251,0.8)',
+          padding: '14px 36px', textAlign: 'center', fontSize: 12, color: 'var(--text-3)',
+          borderTop: '1px solid var(--border)', background: footerBg,
         }}>
           © {new Date().getFullYear()} · PT. Tenjo Nurcahaya Jayabhatara
         </div>

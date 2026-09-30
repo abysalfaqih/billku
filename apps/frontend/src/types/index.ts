@@ -16,6 +16,7 @@ export interface ApiError {
 export interface Customer {
   id: number;
   tenantId: string;
+  customerCode: string | null;
   packageId: number | null;
   name: string;
   email: string | null;

@@ -5,36 +5,22 @@
     {
       "idx": 0,
       "version": "5",
-      "when": 1781459606368,
-      "tag": "0000_adorable_harrier",
+      "when": 1790162404428,
+      "tag": "0000_chubby_tyger_tiger",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "5",
-      "when": 1781872863815,
-      "tag": "0001_thin_the_enforcers",
+      "when": 1790294410799,
+      "tag": "0001_living_hammerhead",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "5",
-      "when": 1783047597397,
-      "tag": "0002_violet_dormammu",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1784279572415,
-      "tag": "0003_same_ogun",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1785469463028,
-      "tag": "0004_funny_puck",
+      "when": 1790555914177,
+      "tag": "0002_spicy_lilith",
       "breakpoints": true
     }
   ]

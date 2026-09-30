@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Wifi, FileText, CreditCard, CheckCircle2, Clock,
   AlertTriangle, XCircle, Edit2, Zap, Phone, MapPin, Calendar,
-  Hash, User, Network, ChevronDown, ChevronUp, Key,
+  Hash, User, Network, ChevronDown, ChevronUp, Key, IdCard,
 } from 'lucide-react';
 import { useResetPassword } from '@/hooks/useMonitoring';
 import { Badge } from '@/components/ui/badge';
@@ -232,6 +232,11 @@ export default function CustomerDetailPage() {
                   <Badge variant={customer.status as any} />
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {customer.customerCode && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>
+                      <IdCard size={11} /> {customer.customerCode}
+                    </span>
+                  )}
                   {customer.phone && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-3)' }}>
                       <Phone size={11} /> {customer.phone}
@@ -344,6 +349,7 @@ export default function CustomerDetailPage() {
                   <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
                     Informasi Pribadi
                   </p>
+                  <InfoItem icon={IdCard} label="No. Pelanggan" value={customer.customerCode ?? '—'} />
                   <InfoItem icon={Phone} label="Nomor HP" value={customer.phone} />
                   <InfoItem icon={MapPin} label="Area" value={data.area?.name ?? '—'} />
                   <InfoItem icon={User} label="Alamat" value={customer.address ?? '—'} />

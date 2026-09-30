@@ -14,18 +14,18 @@ export class WaBlastAdapter implements IWhatsAppAdapter {
   private readonly logger = new Logger(WaBlastAdapter.name);
   private readonly timeoutMs = 15000;
 
-  // token & secretKey didapat dari menu Device - Settings di dashboard Wablas.
-  // server = subdomain akun (mis. "solo", "kudus", "ampel") — cek di dashboard
-  // Wablas kamu server-nya yang mana, biasanya kelihatan di URL saat login.
+  // token = TOKEN UTUH dari dashboard Wablas, menu Device - Settings.
+  // Wablas menampilkannya sebagai satu string (format: xxxxx.yyyyy) — tempel
+  // apa adanya, tidak perlu dipecah jadi token+secret terpisah.
+  // domain = domain API akun Anda, apa adanya, misal https://solo.wablas.com
   constructor(
     private readonly token: string,
-    private readonly secretKey: string,
-    private readonly server: string,
+    private readonly domain: string,
   ) {}
 
   async send(phone: string, message: string): Promise<WhatsAppSendResult> {
     const number = normalizePhone(phone);
-    const url = `https://${this.server}.wablas.com/api/send-message`;
+    const url = `${this.domain.replace(/\/+$/, '')}/api/send-message`;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -36,7 +36,7 @@ export class WaBlastAdapter implements IWhatsAppAdapter {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          Authorization: `${this.token}.${this.secretKey}`,
+          Authorization: this.token,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: body.toString(),
@@ -73,7 +73,7 @@ export class WaBlastAdapter implements IWhatsAppAdapter {
   private describeError(err: unknown): string {
     if (err instanceof Error) {
       if (err.name === 'AbortError') {
-        return `Timeout setelah ${this.timeoutMs}ms — server ${this.server}.wablas.com tidak merespons`;
+        return `Timeout setelah ${this.timeoutMs}ms — ${this.domain} tidak merespons`;
       }
       const cause = (err as Error & { cause?: unknown }).cause;
       return cause ? `${err.message} | cause: ${String(cause)}` : err.message;

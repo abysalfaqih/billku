@@ -141,6 +141,13 @@ function CustomerRow({
       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
+      {/* No Pelanggan */}
+      <td style={{ padding: '12px 16px' }}>
+        <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-2)' }}>
+          {customer.customerCode ?? '—'}
+        </span>
+      </td>
+
       {/* Pelanggan */}
       <td style={{ padding: '12px 16px' }}>
         <div>
@@ -171,27 +178,6 @@ function CustomerRow({
           </span>
         ) : (
           <span style={{ fontSize: 12, color: 'var(--text-3)' }}>—</span>
-        )}
-      </td>
-
-      {/* PPPoE */}
-      <td style={{ padding: '12px 16px' }}>
-        {customer.connectionType === 'hotspot' ? (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99,
-            background: 'rgba(245,158,11,0.10)', color: '#B45309',
-            border: '1px solid rgba(245,158,11,0.25)',
-          }}>
-            Hotspot
-          </span>
-        ) : (
-          <code style={{
-            fontSize: 11, background: 'var(--surface-2)', padding: '2px 8px',
-            borderRadius: 6, color: 'var(--text-2)', border: '1px solid var(--border)',
-          }}>
-            {customer.usernamePppoe ?? '—'}
-          </code>
         )}
       </td>
 
@@ -353,7 +339,7 @@ export default function CustomersPage() {
                 <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      {['Pelanggan', 'Area', 'PPPoE', 'Tgl. Tagihan', 'Status', ''].map((h) => (
+                      {['No Pelanggan', 'Pelanggan', 'Area', 'Tgl. Tagihan', 'Status', ''].map((h) => (
                         <th key={h} style={{
                           padding: '10px 16px', textAlign: 'left', fontSize: 11,
                           fontWeight: 700, color: 'var(--text-3)', letterSpacing: '0.06em',

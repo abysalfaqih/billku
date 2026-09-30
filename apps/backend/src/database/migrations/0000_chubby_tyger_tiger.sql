@@ -6,11 +6,42 @@ CREATE TABLE `tenants` (
 	`phone` varchar(20) NOT NULL,
 	`address` text,
 	`logo_url` varchar(500),
+	`favicon_url` varchar(500),
+	`motto` varchar(255),
+	`about` text,
+	`bandwidth_enabled` boolean NOT NULL DEFAULT false,
+	`bandwidth_description` varchar(255),
+	`bandwidth_price_monthly` decimal(15,2),
+	`bank_accounts` text,
 	`is_active` boolean NOT NULL DEFAULT true,
 	`created_at` timestamp NOT NULL DEFAULT (now()),
 	`updated_at` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `tenants_id` PRIMARY KEY(`id`),
 	CONSTRAINT `tenants_slug_unique` UNIQUE(`slug`)
+);
+--> statement-breakpoint
+CREATE TABLE `tenant_invoices` (
+	`id` bigint AUTO_INCREMENT NOT NULL,
+	`tenant_id` varchar(36) NOT NULL,
+	`invoice_number` varchar(50) NOT NULL,
+	`invoice_date` timestamp NOT NULL,
+	`period_month` int NOT NULL,
+	`period_year` int NOT NULL,
+	`items` text NOT NULL,
+	`subtotal` decimal(15,2) NOT NULL,
+	`discount_amount` decimal(15,2) NOT NULL DEFAULT '0',
+	`ppn_percent` decimal(5,2) NOT NULL DEFAULT '0',
+	`ppn_amount` decimal(15,2) NOT NULL DEFAULT '0',
+	`total_amount` decimal(15,2) NOT NULL,
+	`payment_description` text,
+	`authorized_by` varchar(255),
+	`authorized_title` varchar(100),
+	`status` enum('draft','sent','paid') NOT NULL DEFAULT 'draft',
+	`notes` text,
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`updated_at` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `tenant_invoices_id` PRIMARY KEY(`id`),
+	CONSTRAINT `tenant_invoices_number_unique` UNIQUE(`invoice_number`)
 );
 --> statement-breakpoint
 CREATE TABLE `users` (
@@ -41,6 +72,16 @@ CREATE TABLE `mikrotik_configs` (
 	`created_at` timestamp NOT NULL DEFAULT (now()),
 	`updated_at` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `mikrotik_configs_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `areas` (
+	`id` bigint AUTO_INCREMENT NOT NULL,
+	`tenant_id` varchar(36) NOT NULL,
+	`name` varchar(255) NOT NULL,
+	`is_active` boolean NOT NULL DEFAULT true,
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`updated_at` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `areas_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
 CREATE TABLE `refresh_tokens` (
@@ -93,6 +134,10 @@ CREATE TABLE `customers` (
 	`id` bigint AUTO_INCREMENT NOT NULL,
 	`tenant_id` varchar(36) NOT NULL,
 	`package_id` bigint,
+	`area_id` bigint,
+	`connection_type` enum('pppoe','hotspot') NOT NULL DEFAULT 'pppoe',
+	`mikrotik_config_id` bigint,
+	`hotspot_profile` varchar(100),
 	`name` varchar(255) NOT NULL,
 	`email` varchar(255),
 	`phone` varchar(20) NOT NULL,
@@ -100,9 +145,12 @@ CREATE TABLE `customers` (
 	`nik` varchar(20),
 	`username_pppoe` varchar(100),
 	`password_pppoe` varchar(255),
+	`pppoe_profile` varchar(100),
 	`ip_address` varchar(45),
 	`billing_date` int NOT NULL,
 	`installation_date` date,
+	`tax_enabled` boolean NOT NULL DEFAULT false,
+	`tax_percent` decimal(5,2),
 	`status` enum('active','isolated','suspended','terminated') NOT NULL DEFAULT 'active',
 	`notes` text,
 	`created_at` timestamp NOT NULL DEFAULT (now()),
@@ -120,6 +168,9 @@ CREATE TABLE `bills` (
 	`period_end` date NOT NULL,
 	`due_date` date NOT NULL,
 	`amount` decimal(15,2) NOT NULL,
+	`tax_percent` decimal(5,2),
+	`tax_amount` decimal(15,2) NOT NULL DEFAULT '0',
+	`total_amount` decimal(15,2) NOT NULL DEFAULT '0',
 	`package_name` varchar(255) NOT NULL,
 	`status` enum('unpaid','paid','overdue','cancelled') NOT NULL DEFAULT 'unpaid',
 	`notes` text,
@@ -157,6 +208,17 @@ CREATE TABLE `whatsapp_configs` (
 	CONSTRAINT `whatsapp_configs_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+CREATE TABLE `whatsapp_templates` (
+	`id` bigint AUTO_INCREMENT NOT NULL,
+	`tenant_id` varchar(36) NOT NULL,
+	`type` enum('registration','reminder','isolir','payment') NOT NULL,
+	`content` text NOT NULL,
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	`updated_at` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `whatsapp_templates_id` PRIMARY KEY(`id`),
+	CONSTRAINT `whatsapp_templates_tenant_type_unique` UNIQUE(`tenant_id`,`type`)
+);
+--> statement-breakpoint
 CREATE TABLE `whatsapp_logs` (
 	`id` bigint AUTO_INCREMENT NOT NULL,
 	`tenant_id` varchar(36) NOT NULL,
@@ -178,9 +240,12 @@ CREATE TABLE `activity_logs` (
 	`id` bigint AUTO_INCREMENT NOT NULL,
 	`tenant_id` varchar(36),
 	`user_id` bigint,
+	`user_email` varchar(255),
 	`method` varchar(10) NOT NULL,
 	`path` varchar(500) NOT NULL,
 	`action` varchar(255) NOT NULL,
+	`target_id` varchar(64),
+	`metadata` json,
 	`ip_address` varchar(45),
 	`user_agent` varchar(500),
 	`status_code` int NOT NULL,
@@ -197,12 +262,12 @@ CREATE TABLE `subscription_plans` (
 	`max_customers` int NOT NULL DEFAULT 100,
 	`max_mikrotik` int NOT NULL DEFAULT 1,
 	`max_ip_pools` int NOT NULL DEFAULT 5,
-	`max_users` int NOT NULL DEFAULT 3,
+	`max_users` int NOT NULL DEFAULT 2,
 	`has_whatsapp` boolean NOT NULL DEFAULT false,
 	`has_api_access` boolean NOT NULL DEFAULT false,
 	`has_reports` boolean NOT NULL DEFAULT true,
-	`extra_features` text,
 	`is_active` boolean NOT NULL DEFAULT true,
+	`extra_features` text,
 	`created_at` timestamp NOT NULL DEFAULT (now()),
 	`updated_at` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `subscription_plans_id` PRIMARY KEY(`id`)
@@ -214,7 +279,7 @@ CREATE TABLE `tenant_subscriptions` (
 	`plan_id` bigint NOT NULL,
 	`status` enum('active','expired','trial','cancelled') NOT NULL DEFAULT 'trial',
 	`started_at` timestamp NOT NULL DEFAULT (now()),
-	`expires_at` timestamp NOT NULL,
+	`expires_at` datetime NOT NULL,
 	`duration_months` int NOT NULL DEFAULT 1,
 	`amount_paid` decimal(15,2) NOT NULL DEFAULT '0',
 	`notes` text,
@@ -224,8 +289,10 @@ CREATE TABLE `tenant_subscriptions` (
 	CONSTRAINT `tenant_subscriptions_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+ALTER TABLE `tenant_invoices` ADD CONSTRAINT `tenant_invoices_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `users` ADD CONSTRAINT `users_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `mikrotik_configs` ADD CONSTRAINT `mikrotik_configs_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `areas` ADD CONSTRAINT `areas_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `refresh_tokens` ADD CONSTRAINT `refresh_tokens_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `refresh_tokens` ADD CONSTRAINT `refresh_tokens_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ip_pools` ADD CONSTRAINT `ip_pools_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -234,6 +301,8 @@ ALTER TABLE `packages` ADD CONSTRAINT `packages_tenant_id_tenants_id_fk` FOREIGN
 ALTER TABLE `packages` ADD CONSTRAINT `packages_ip_pool_id_ip_pools_id_fk` FOREIGN KEY (`ip_pool_id`) REFERENCES `ip_pools`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `customers` ADD CONSTRAINT `customers_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `customers` ADD CONSTRAINT `customers_package_id_packages_id_fk` FOREIGN KEY (`package_id`) REFERENCES `packages`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `customers` ADD CONSTRAINT `customers_area_id_areas_id_fk` FOREIGN KEY (`area_id`) REFERENCES `areas`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `customers` ADD CONSTRAINT `customers_mikrotik_config_id_mikrotik_configs_id_fk` FOREIGN KEY (`mikrotik_config_id`) REFERENCES `mikrotik_configs`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `bills` ADD CONSTRAINT `bills_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `bills` ADD CONSTRAINT `bills_customer_id_customers_id_fk` FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `payments` ADD CONSTRAINT `payments_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -241,6 +310,7 @@ ALTER TABLE `payments` ADD CONSTRAINT `payments_bill_id_bills_id_fk` FOREIGN KEY
 ALTER TABLE `payments` ADD CONSTRAINT `payments_customer_id_customers_id_fk` FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `payments` ADD CONSTRAINT `payments_created_by_users_id_fk` FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `whatsapp_configs` ADD CONSTRAINT `whatsapp_configs_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `whatsapp_templates` ADD CONSTRAINT `whatsapp_templates_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `whatsapp_logs` ADD CONSTRAINT `whatsapp_logs_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `whatsapp_logs` ADD CONSTRAINT `whatsapp_logs_customer_id_customers_id_fk` FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `whatsapp_logs` ADD CONSTRAINT `whatsapp_logs_bill_id_bills_id_fk` FOREIGN KEY (`bill_id`) REFERENCES `bills`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -248,8 +318,11 @@ ALTER TABLE `activity_logs` ADD CONSTRAINT `activity_logs_tenant_id_tenants_id_f
 ALTER TABLE `tenant_subscriptions` ADD CONSTRAINT `tenant_subscriptions_tenant_id_tenants_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `tenant_subscriptions` ADD CONSTRAINT `tenant_subscriptions_plan_id_subscription_plans_id_fk` FOREIGN KEY (`plan_id`) REFERENCES `subscription_plans`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `tenant_subscriptions` ADD CONSTRAINT `tenant_subscriptions_created_by_users_id_fk` FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX `tenant_invoices_tenant_id_idx` ON `tenant_invoices` (`tenant_id`);--> statement-breakpoint
+CREATE INDEX `tenant_invoices_period_idx` ON `tenant_invoices` (`period_year`,`period_month`);--> statement-breakpoint
 CREATE INDEX `users_tenant_id_idx` ON `users` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `mikrotik_configs_tenant_id_idx` ON `mikrotik_configs` (`tenant_id`);--> statement-breakpoint
+CREATE INDEX `areas_tenant_id_idx` ON `areas` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `refresh_tokens_user_id_idx` ON `refresh_tokens` (`user_id`);--> statement-breakpoint
 CREATE INDEX `refresh_tokens_tenant_id_idx` ON `refresh_tokens` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `ip_pools_tenant_id_idx` ON `ip_pools` (`tenant_id`);--> statement-breakpoint
@@ -258,6 +331,8 @@ CREATE INDEX `packages_tenant_id_idx` ON `packages` (`tenant_id`);--> statement-
 CREATE INDEX `customers_tenant_id_idx` ON `customers` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `customers_status_idx` ON `customers` (`status`);--> statement-breakpoint
 CREATE INDEX `customers_billing_date_idx` ON `customers` (`billing_date`);--> statement-breakpoint
+CREATE INDEX `customers_area_id_idx` ON `customers` (`area_id`);--> statement-breakpoint
+CREATE INDEX `customers_connection_type_idx` ON `customers` (`connection_type`);--> statement-breakpoint
 CREATE INDEX `bills_tenant_id_idx` ON `bills` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `bills_customer_id_idx` ON `bills` (`customer_id`);--> statement-breakpoint
 CREATE INDEX `bills_status_idx` ON `bills` (`status`);--> statement-breakpoint
@@ -267,12 +342,14 @@ CREATE INDEX `payments_bill_id_idx` ON `payments` (`bill_id`);--> statement-brea
 CREATE INDEX `payments_customer_id_idx` ON `payments` (`customer_id`);--> statement-breakpoint
 CREATE INDEX `payments_paid_at_idx` ON `payments` (`paid_at`);--> statement-breakpoint
 CREATE INDEX `whatsapp_configs_tenant_id_idx` ON `whatsapp_configs` (`tenant_id`);--> statement-breakpoint
+CREATE INDEX `whatsapp_templates_tenant_id_idx` ON `whatsapp_templates` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `whatsapp_logs_tenant_id_idx` ON `whatsapp_logs` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `whatsapp_logs_trigger_idx` ON `whatsapp_logs` (`trigger`);--> statement-breakpoint
 CREATE INDEX `whatsapp_logs_status_idx` ON `whatsapp_logs` (`status`);--> statement-breakpoint
 CREATE INDEX `activity_logs_tenant_id_idx` ON `activity_logs` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `activity_logs_user_id_idx` ON `activity_logs` (`user_id`);--> statement-breakpoint
 CREATE INDEX `activity_logs_created_at_idx` ON `activity_logs` (`created_at`);--> statement-breakpoint
+CREATE INDEX `activity_logs_target_id_idx` ON `activity_logs` (`target_id`);--> statement-breakpoint
 CREATE INDEX `tenant_subscriptions_tenant_id_idx` ON `tenant_subscriptions` (`tenant_id`);--> statement-breakpoint
 CREATE INDEX `tenant_subscriptions_status_idx` ON `tenant_subscriptions` (`status`);--> statement-breakpoint
 CREATE INDEX `tenant_subscriptions_expires_at_idx` ON `tenant_subscriptions` (`expires_at`);

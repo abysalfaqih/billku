@@ -1,11 +1,11 @@
 import {
   Injectable, Inject, NotFoundException, ConflictException, Logger, BadRequestException,
 } from '@nestjs/common';
-import { eq, and, like, or, count, desc, isNotNull } from 'drizzle-orm';
+import { eq, and, like, or, count, desc, isNotNull, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { customers, packages, ipPools, mikrotikConfigs, areas, bills, payments, whatsappLogs } from '../../database/schema';
+import { customers, packages, ipPools, mikrotikConfigs, areas, bills, payments, whatsappLogs, customerCodeCounters } from '../../database/schema';
 import { RadiusService } from '../radius/radius.service';
 import { MikrotikService } from '../mikrotik/mikrotik.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -34,10 +34,13 @@ export class CustomersService {
   async create(dto: CreateCustomerDto, user: AuthUser) {
     await this.validatePackageBelongsToTenant(dto.packageId, user.tenantId);
     await this.validateAreaBelongsToTenant(dto.areaId, user.tenantId);
-    if (dto.usernamePppoe) await this.ensurePppoeUnique(dto.usernamePppoe, user.tenantId);
+    if (dto.usernamePppoe) await this.ensurePppoeUnique(dto.usernamePppoe);
+
+    const customerCode = await this.generateCustomerCode(user.tenantId);
 
     const [result] = await this.db.insert(customers).values({
       tenantId: user.tenantId,
+      customerCode,
       packageId: dto.packageId,
       areaId: dto.areaId,
       connectionType: dto.connectionType ?? 'pppoe',
@@ -125,7 +128,7 @@ export class CustomersService {
     const [data, [{ total }]] = await Promise.all([
       this.db
         .select({
-          id: customers.id, tenantId: customers.tenantId,
+          id: customers.id, tenantId: customers.tenantId, customerCode: customers.customerCode,
           packageId: customers.packageId, areaId: customers.areaId,
           areaName: areas.name,
           connectionType: customers.connectionType,
@@ -201,7 +204,7 @@ export class CustomersService {
     if (dto.packageId) await this.validatePackageBelongsToTenant(dto.packageId, user.tenantId);
     if (dto.areaId)    await this.validateAreaBelongsToTenant(dto.areaId, user.tenantId);
     if (dto.usernamePppoe && dto.usernamePppoe !== existing.usernamePppoe) {
-      await this.ensurePppoeUnique(dto.usernamePppoe, user.tenantId, id);
+      await this.ensurePppoeUnique(dto.usernamePppoe, id);
     }
 
     const { installationDate, taxPercent, ...rest } = dto;
@@ -390,7 +393,7 @@ export class CustomersService {
   async exportCsv(user: AuthUser): Promise<string> {
     const all = await this.db
       .select({
-        id: customers.id, name: customers.name, phone: customers.phone,
+        id: customers.id, customerCode: customers.customerCode, name: customers.name, phone: customers.phone,
         email: customers.email, address: customers.address, nik: customers.nik,
         areaName: areas.name, status: customers.status,
         connectionType: customers.connectionType,
@@ -404,11 +407,11 @@ export class CustomersService {
       .orderBy(customers.name);
 
     const headers = [
-      'ID','Nama','No HP','Email','Area','Alamat','NIK','Tipe Koneksi',
+      'ID','Kode Pelanggan','Nama','No HP','Email','Area','Alamat','NIK','Tipe Koneksi',
       'Username','Status','Tgl Tagihan','Tgl Instalasi','PPN Aktif','% PPN','Tgl Daftar',
     ];
     const rows = all.map(c => [
-      String(c.id), c.name, c.phone, c.email ?? '', c.areaName ?? '',
+      String(c.id), c.customerCode ?? '-', c.name, c.phone, c.email ?? '', c.areaName ?? '',
       c.address ?? '', c.nik ?? '', c.connectionType, c.usernamePppoe ?? '',
       c.status, String(c.billingDate),
       c.installationDate ? new Date(c.installationDate).toLocaleDateString('id-ID') : '',
@@ -526,6 +529,34 @@ export class CustomersService {
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Generate "No. Pelanggan" permanen: YYMMDDNNN (NNN reset tiap hari,
+   * per tenant). Urutan diambil dari tabel counter lewat INSERT ... ON
+   * DUPLICATE KEY UPDATE last_seq = last_seq + 1 — operasi ini atomik di
+   * level MySQL, jadi aman dipanggil bersamaan oleh banyak request tanpa
+   * bikin dua pelanggan kebagian kode yang sama.
+   */
+  private async generateCustomerCode(tenantId: string, date: Date = new Date()): Promise<string> {
+    const yy = String(date.getFullYear()).slice(-2);
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const dateKey = `${yy}${mm}${dd}`;
+
+    return this.db.transaction(async (tx) => {
+      await tx
+        .insert(customerCodeCounters)
+        .values({ tenantId, dateKey, lastSeq: 1 })
+        .onDuplicateKeyUpdate({ set: { lastSeq: sql`last_seq + 1` } });
+
+      const [row] = await tx
+        .select({ lastSeq: customerCodeCounters.lastSeq })
+        .from(customerCodeCounters)
+        .where(and(eq(customerCodeCounters.tenantId, tenantId), eq(customerCodeCounters.dateKey, dateKey)));
+
+      return `${dateKey}${String(row.lastSeq).padStart(3, '0')}`;
+    });
+  }
+
   private async syncHotspotToMikrotik(
     customer: typeof customers.$inferSelect,
     tenantId: string,
@@ -632,13 +663,16 @@ export class CustomersService {
     if (!area) throw new NotFoundException('Area tidak ditemukan');
   }
 
-  private async ensurePppoeUnique(username: string, tenantId: string, excludeId?: number) {
+  // Global (lintas tenant) — lihat komentar di customers.schema.ts kenapa.
+  private async ensurePppoeUnique(username: string, excludeId?: number) {
     const [existing] = await this.db
       .select({ id: customers.id }).from(customers)
-      .where(and(eq(customers.usernamePppoe, username), eq(customers.tenantId, tenantId)))
+      .where(eq(customers.usernamePppoe, username))
       .limit(1);
     if (existing && existing.id !== excludeId) {
-      throw new ConflictException(`Username '${username}' sudah digunakan`);
+      throw new ConflictException(
+        `Username '${username}' sudah dipakai (oleh pelanggan lain, bisa jadi di tenant lain) — pilih username lain`,
+      );
     }
   }
 

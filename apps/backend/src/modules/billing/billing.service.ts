@@ -153,7 +153,10 @@ export class BillingService {
     const bill = await this.findOne(id, user);
 
     const [customer] = await this.db
-      .select({ id: customers.id, name: customers.name, phone: customers.phone, address: customers.address })
+      .select({
+        id: customers.id, customerCode: customers.customerCode,
+        name: customers.name, phone: customers.phone, address: customers.address,
+      })
       .from(customers)
       .where(eq(customers.id, bill.customerId))
       .limit(1);
@@ -188,6 +191,7 @@ export class BillingService {
       },
       customer: {
         id: customer?.id ?? bill.customerId,
+        customerCode: customer?.customerCode ?? null,
         name: customer?.name ?? '-',
         phone: customer?.phone ?? '-',
         address: customer?.address ?? null,

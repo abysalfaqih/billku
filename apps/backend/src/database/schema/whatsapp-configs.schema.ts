@@ -31,7 +31,8 @@ export const whatsappConfigs = mysqlTable(
 
     // Config tambahan per provider (JSON string)
     // Meta: { "phone_number_id": "xxx" }
-    // WA Blast: { "secret_key": "xxx", "server": "solo" } — server = subdomain akun Wablas
+    // WA Blast: { "domain": "https://solo.wablas.com" } — apiKey diisi TOKEN
+    //   UTUH dari dashboard Wablas apa adanya (format xxx.yyy, tidak dipecah)
     // Fonnte: null
     extraConfig: text('extra_config'),
 

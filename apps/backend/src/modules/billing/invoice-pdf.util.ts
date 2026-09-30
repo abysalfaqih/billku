@@ -4,7 +4,7 @@ interface BankAccount { bankName: string; accountNumber: string; accountName: st
 
 interface InvoicePdfData {
   tenant: { name: string; address: string | null; phone: string; email: string; motto?: string | null; bankAccounts: BankAccount[] };
-  customer: { id: number; name: string; phone: string; address: string | null };
+  customer: { id: number; customerCode: string | null; name: string; phone: string; address: string | null };
   bill: {
     billNumber: string; periodStart: Date; periodEnd: Date; dueDate: Date;
     packageName: string; amount: string; taxPercent: string | null; taxAmount: string;
@@ -69,7 +69,7 @@ export function buildInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
 
     const metaX = 320;
     const metaRows: [string, string][] = [
-      ['No. Pelanggan', String(data.customer.id).padStart(6, '0')],
+      ['No. Pelanggan', data.customer.customerCode ?? '-'],
       ['No. Invoice', data.bill.billNumber],
       ['Tgl. Invoice', formatDate(data.bill.createdAt)],
       ['Jatuh Tempo', formatDate(data.bill.dueDate)],

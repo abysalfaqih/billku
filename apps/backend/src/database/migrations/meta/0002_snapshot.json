@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "9e2bf268-e189-4a24-a50d-4a004fb5a4b0",
-  "prevId": "24d11d49-015b-4dee-bcbe-b38b02f00ed9",
+  "id": "d92b9a23-db87-4cfe-93eb-74650f75cbf6",
+  "prevId": "9edba910-8944-47ab-96df-b6d401151c74",
   "tables": {
     "tenants": {
       "name": "tenants",
@@ -77,6 +77,28 @@
           "notNull": false,
           "autoincrement": false
         },
+        "bandwidth_enabled": {
+          "name": "bandwidth_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "bandwidth_description": {
+          "name": "bandwidth_description",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bandwidth_price_monthly": {
+          "name": "bandwidth_price_monthly",
+          "type": "decimal(15,2)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "bank_accounts": {
           "name": "bank_accounts",
           "type": "text",
@@ -123,6 +145,200 @@
       "compositePrimaryKeys": {
         "tenants_id": {
           "name": "tenants_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "tenant_invoices": {
+      "name": "tenant_invoices",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invoice_number": {
+          "name": "invoice_number",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invoice_date": {
+          "name": "invoice_date",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "period_month": {
+          "name": "period_month",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "period_year": {
+          "name": "period_year",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "items": {
+          "name": "items",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subtotal": {
+          "name": "subtotal",
+          "type": "decimal(15,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "discount_amount": {
+          "name": "discount_amount",
+          "type": "decimal(15,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "ppn_percent": {
+          "name": "ppn_percent",
+          "type": "decimal(5,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "ppn_amount": {
+          "name": "ppn_amount",
+          "type": "decimal(15,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "total_amount": {
+          "name": "total_amount",
+          "type": "decimal(15,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payment_description": {
+          "name": "payment_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "authorized_by": {
+          "name": "authorized_by",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "authorized_title": {
+          "name": "authorized_title",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('draft','sent','paid')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(now())"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "onUpdate": true,
+          "default": "(now())"
+        }
+      },
+      "indexes": {
+        "tenant_invoices_number_unique": {
+          "name": "tenant_invoices_number_unique",
+          "columns": [
+            "invoice_number"
+          ],
+          "isUnique": true
+        },
+        "tenant_invoices_tenant_id_idx": {
+          "name": "tenant_invoices_tenant_id_idx",
+          "columns": [
+            "tenant_id"
+          ],
+          "isUnique": false
+        },
+        "tenant_invoices_period_idx": {
+          "name": "tenant_invoices_period_idx",
+          "columns": [
+            "period_year",
+            "period_month"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "tenant_invoices_tenant_id_tenants_id_fk": {
+          "name": "tenant_invoices_tenant_id_tenants_id_fk",
+          "tableFrom": "tenant_invoices",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "tenant_invoices_id": {
+          "name": "tenant_invoices_id",
           "columns": [
             "id"
           ]
@@ -453,6 +669,60 @@
           "name": "areas_id",
           "columns": [
             "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "customer_code_counters": {
+      "name": "customer_code_counters",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "date_key": {
+          "name": "date_key",
+          "type": "varchar(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seq": {
+          "name": "last_seq",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "customer_code_counters_tenant_id_tenants_id_fk": {
+          "name": "customer_code_counters_tenant_id_tenants_id_fk",
+          "tableFrom": "customer_code_counters",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "customer_code_counters_tenant_id_date_key_pk": {
+          "name": "customer_code_counters_tenant_id_date_key_pk",
+          "columns": [
+            "tenant_id",
+            "date_key"
           ]
         }
       },
@@ -896,6 +1166,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "customer_code": {
+          "name": "customer_code",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "package_id": {
           "name": "package_id",
           "type": "bigint",
@@ -906,6 +1183,28 @@
         "area_id": {
           "name": "area_id",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "connection_type": {
+          "name": "connection_type",
+          "type": "enum('pppoe','hotspot')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pppoe'"
+        },
+        "mikrotik_config_id": {
+          "name": "mikrotik_config_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hotspot_profile": {
+          "name": "hotspot_profile",
+          "type": "varchar(100)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1064,11 +1363,25 @@
           ],
           "isUnique": false
         },
-        "customers_pppoe_tenant_unique": {
-          "name": "customers_pppoe_tenant_unique",
+        "customers_connection_type_idx": {
+          "name": "customers_connection_type_idx",
+          "columns": [
+            "connection_type"
+          ],
+          "isUnique": false
+        },
+        "customers_pppoe_unique": {
+          "name": "customers_pppoe_unique",
+          "columns": [
+            "username_pppoe"
+          ],
+          "isUnique": true
+        },
+        "customers_code_tenant_unique": {
+          "name": "customers_code_tenant_unique",
           "columns": [
             "tenant_id",
-            "username_pppoe"
+            "customer_code"
           ],
           "isUnique": true
         }
@@ -1106,6 +1419,19 @@
           "tableTo": "areas",
           "columnsFrom": [
             "area_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "customers_mikrotik_config_id_mikrotik_configs_id_fk": {
+          "name": "customers_mikrotik_config_id_mikrotik_configs_id_fk",
+          "tableFrom": "customers",
+          "tableTo": "mikrotik_configs",
+          "columnsFrom": [
+            "mikrotik_config_id"
           ],
           "columnsTo": [
             "id"
@@ -1609,6 +1935,98 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "whatsapp_templates": {
+      "name": "whatsapp_templates",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "enum('registration','reminder','isolir','payment')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(now())"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "onUpdate": true,
+          "default": "(now())"
+        }
+      },
+      "indexes": {
+        "whatsapp_templates_tenant_id_idx": {
+          "name": "whatsapp_templates_tenant_id_idx",
+          "columns": [
+            "tenant_id"
+          ],
+          "isUnique": false
+        },
+        "whatsapp_templates_tenant_type_unique": {
+          "name": "whatsapp_templates_tenant_type_unique",
+          "columns": [
+            "tenant_id",
+            "type"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "whatsapp_templates_tenant_id_tenants_id_fk": {
+          "name": "whatsapp_templates_tenant_id_tenants_id_fk",
+          "tableFrom": "whatsapp_templates",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "whatsapp_templates_id": {
+          "name": "whatsapp_templates_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "whatsapp_logs": {
       "name": "whatsapp_logs",
       "columns": {
@@ -1833,6 +2251,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "target_id": {
+          "name": "target_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "ip_address": {
           "name": "ip_address",
           "type": "varchar(45)",
@@ -1889,6 +2321,13 @@
           "name": "activity_logs_created_at_idx",
           "columns": [
             "created_at"
+          ],
+          "isUnique": false
+        },
+        "activity_logs_target_id_idx": {
+          "name": "activity_logs_target_id_idx",
+          "columns": [
+            "target_id"
           ],
           "isUnique": false
         }

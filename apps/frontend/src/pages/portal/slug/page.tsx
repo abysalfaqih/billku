@@ -52,6 +52,7 @@ interface Payment {
 
 interface CustomerData {
   customer: {
+    customerCode: string | null;
     name: string; phone: string; address: string | null;
     status: string; billingDate: number; installationDate: string | null; area: string | null;
   };
@@ -301,6 +302,11 @@ function DashboardScreen({ data, onBack }: { data: CustomerData; onBack: () => v
           <div style={{ textAlign: 'right' }}>
             <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 2 }}>Pelanggan</p>
             <p style={{ fontSize: 14, fontWeight: 700 }}>{customer.name}</p>
+            {customer.customerCode && (
+              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2, fontFamily: 'monospace' }}>
+                {customer.customerCode}
+              </p>
+            )}
           </div>
         </div>
 

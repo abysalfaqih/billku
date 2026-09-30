@@ -11,21 +11,17 @@ export class WhatsAppAdapterFactory {
         return new FonnteAdapter(config.apiKey);
 
       case 'wablast': {
-        // WA Blast butuh secret_key & server (subdomain akun) dari extraConfig
+        // WA Blast cuma butuh domain dari extraConfig — token (apiKey) sudah
+        // string utuh dari dashboard Wablas, dipakai apa adanya.
         const extra = config.extraConfig
-          ? (JSON.parse(config.extraConfig) as {
-              secret_key?: string;
-              server?: string;
-            })
+          ? (JSON.parse(config.extraConfig) as { domain?: string })
           : {};
 
-        if (!extra.secret_key || !extra.server) {
-          throw new Error(
-            "WA Blast adapter butuh 'secret_key' dan 'server' di extraConfig",
-          );
+        if (!extra.domain) {
+          throw new Error("WA Blast adapter butuh 'domain' di extraConfig");
         }
 
-        return new WaBlastAdapter(config.apiKey, extra.secret_key, extra.server);
+        return new WaBlastAdapter(config.apiKey, extra.domain);
       }
 
       case 'meta': {

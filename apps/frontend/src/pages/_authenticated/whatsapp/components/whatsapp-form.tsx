@@ -10,11 +10,11 @@ interface WhatsappFormProps {
   onClose: () => void;
 }
 
-const INIT = { provider: 'fonnte', name: '', apiKey: '', senderNumber: '', phoneNumberId: '', secretKey: '', server: '' };
+const INIT = { provider: 'fonnte', name: '', apiKey: '', senderNumber: '', phoneNumberId: '', domain: '' };
 
 const PROVIDER_INFO: Record<string, { label: string; hint: string }> = {
   fonnte: { label: 'Fonnte', hint: 'API Key dari dashboard Fonnte Anda' },
-  wablast: { label: 'WA Blast', hint: 'Token dari dashboard WA Blast (menu Device - Settings)' },
+  wablast: { label: 'WA Blast', hint: 'Token dari dashboard WA Blast (menu Device - Settings) — tempel apa adanya, satu kotak saja' },
   meta: { label: 'WhatsApp Business API (Meta)', hint: 'Access Token dari Meta for Developers' },
 };
 
@@ -37,8 +37,8 @@ export function WhatsappForm({ open, onClose }: WhatsappFormProps) {
     if (form.provider === 'meta' && form.phoneNumberId) {
       payload.extraConfig = JSON.stringify({ phone_number_id: form.phoneNumberId });
     }
-    if (form.provider === 'wablast' && form.secretKey && form.server) {
-      payload.extraConfig = JSON.stringify({ secret_key: form.secretKey, server: form.server });
+    if (form.provider === 'wablast' && form.domain) {
+      payload.extraConfig = JSON.stringify({ domain: form.domain });
     }
     create.mutate(payload);
   };
@@ -93,18 +93,11 @@ export function WhatsappForm({ open, onClose }: WhatsappFormProps) {
         )}
 
         {form.provider === 'wablast' && (
-          <>
-            <Input
-              label="Secret Key" placeholder="••••••••••••••••"
-              value={form.secretKey} onChange={set('secretKey')} required
-              hint="Digenerate di menu Device - Settings pada dashboard WA Blast"
-            />
-            <Input
-              label="Server" placeholder="contoh: solo, kudus, jogja"
-              value={form.server} onChange={set('server')} required
-              hint="Nama server/subdomain akun Anda, terlihat di URL saat login ke WA Blast"
-            />
-          </>
+          <Input
+            label="Domain API" placeholder="https://solo.wablas.com"
+            value={form.domain} onChange={set('domain')} required
+            hint="Domain akun WA Blast Anda, tempel apa adanya (terlihat di URL saat login ke dashboard)"
+          />
         )}
 
         <button type="submit" style={{ display: 'none' }} />

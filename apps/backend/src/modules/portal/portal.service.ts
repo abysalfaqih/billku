@@ -135,6 +135,7 @@ export class PortalService {
 
     return {
       customer: {
+        customerCode: customer.customerCode,
         name: customer.name,
         phone: maskPhone(customer.phone),
         address: customer.address,

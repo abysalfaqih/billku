@@ -12,6 +12,13 @@ export const customers = mysqlTable(
   {
     id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
     tenantId: varchar('tenant_id', { length: 36 }).notNull().references(() => tenants.id),
+
+    // Identitas permanen pelanggan (No. Pelanggan) — format: PEL-YYMMDD-NNN.
+    // Nullable karena pelanggan lama (sebelum fitur ini ada) belum punya kode
+    // sampai dijalankan script backfill. Unique index tetap aman untuk baris
+    // yang masih NULL (MySQL tidak menganggap NULL bentrok dengan NULL lain).
+    customerCode: varchar('customer_code', { length: 30 }),
+
     packageId: bigint('package_id', { mode: 'number' }).references(() => packages.id),
     areaId: bigint('area_id', { mode: 'number' }).references(() => areas.id),
 
@@ -54,7 +61,13 @@ export const customers = mysqlTable(
     index('customers_billing_date_idx').on(table.billingDate),
     index('customers_area_id_idx').on(table.areaId),
     index('customers_connection_type_idx').on(table.connectionType),
-    uniqueIndex('customers_pppoe_tenant_unique').on(table.tenantId, table.usernamePppoe),
+    // GLOBAL (bukan per-tenant) — sengaja begini. Tabel RADIUS (radcheck dkk)
+    // cuma kenal 'username', tidak tahu konsep tenant. Kalau 2 tenant beda
+    // punya username PPPoE sama, entri RADIUS-nya akan tabrakan/saling
+    // menimpa — misal hapus pelanggan tenant A bisa ikut memutus pelanggan
+    // tenant B yang usernamenya sama. Makanya harus unik se-platform.
+    uniqueIndex('customers_pppoe_unique').on(table.usernamePppoe),
+    uniqueIndex('customers_code_tenant_unique').on(table.tenantId, table.customerCode),
   ],
 );
 

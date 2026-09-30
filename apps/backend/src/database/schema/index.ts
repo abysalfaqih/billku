@@ -6,6 +6,7 @@ export * from './tenant-invoices.schema';
 export * from './users.schema';
 export * from './mikrotik-configs.schema';
 export * from './areas.schema';
+export * from './customer-code-counters.schema';
 
 // Level 3
 export * from './refresh-tokens.schema';
