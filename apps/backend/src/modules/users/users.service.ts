@@ -134,6 +134,25 @@ export class UsersService {
     return this.findOne(id, currentUser, tenantIdQuery);
   }
 
+  async remove(id: number, currentUser: AuthUser, tenantIdQuery?: string) {
+    const user = await this.findOne(id, currentUser, tenantIdQuery);
+
+    if (user.id === currentUser.userId) {
+      throw new BadRequestException('Tidak bisa menghapus akun sendiri');
+    }
+
+    const tenantId = this.resolveTenantId(currentUser, tenantIdQuery);
+
+    // Hapus permanen. refresh_tokens ikut terhapus (ON DELETE CASCADE).
+    // Riwayat di payments/tenant_subscriptions/activity_logs TETAP ada,
+    // cuma referensi "dibuat oleh"-nya jadi kosong (lihat skema).
+    await this.db
+      .delete(users)
+      .where(and(eq(users.id, id), eq(users.tenantId, tenantId)));
+
+    return { message: 'Pengguna berhasil dihapus permanen' };
+  }
+
   async toggleActive(id: number, currentUser: AuthUser, tenantIdQuery?: string) {
     const user = await this.findOne(id, currentUser, tenantIdQuery);
 

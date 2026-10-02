@@ -27,12 +27,15 @@ export class PackagesController {
     return this.packagesService.create(dto, user);
   }
 
+  // Sengaja TIDAK di-@Roles(): dipakai staff untuk dropdown pilih paket
+  // saat bikin/edit pelanggan.
   @Get()
   findAll(@CurrentUser() user: AuthUser) {
     return this.packagesService.findAll(user);
   }
 
   @Get(':id')
+  @Roles('super_admin', 'admin')
   findOne(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthUser,

@@ -26,6 +26,7 @@ export class WhatsappConfigsController {
   }
 
   @Get()
+  @Roles('super_admin', 'admin')
   findAll(@CurrentUser() user: AuthUser) {
     return this.service.findAll(user);
   }

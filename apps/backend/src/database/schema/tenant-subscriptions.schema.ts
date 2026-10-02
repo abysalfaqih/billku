@@ -33,7 +33,7 @@ export const tenantSubscriptions = mysqlTable(
     amountPaid: decimal('amount_paid', { precision: 15, scale: 2 }).notNull().default('0'),
     notes: text('notes'),
     createdBy: bigint('created_by', { mode: 'number' })
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
   },

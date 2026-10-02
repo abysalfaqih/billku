@@ -26,11 +26,13 @@ export class IpPoolsController {
   }
 
   @Get()
+  @Roles('super_admin', 'admin')
   findAll(@CurrentUser() user: AuthUser) {
     return this.ipPoolsService.findAll(user);
   }
 
   @Get(':id')
+  @Roles('super_admin', 'admin')
   findOne(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthUser,

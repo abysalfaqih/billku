@@ -2,7 +2,6 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { ReportPeriodDto } from './dto/report-period.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { SubscriptionService } from '../subscription/subscription.service';
 
@@ -24,7 +23,6 @@ export class ReportsController {
 
   // Laporan pendapatan dengan filter periode
   @Get('revenue')
-  @Roles('super_admin', 'admin')
   async revenue(
     @Query() query: ReportPeriodDto,
     @CurrentUser() user: AuthUser,
@@ -50,7 +48,6 @@ export class ReportsController {
 
   // Statistik tagihan
   @Get('bills')
-  @Roles('super_admin', 'admin')
   async bills(@CurrentUser() user: AuthUser) {
     if (user.role !== 'super_admin') {
       await this.subscriptionService.checkReportsFeature(user.tenantId);

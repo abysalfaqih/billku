@@ -40,10 +40,12 @@ export const payments = mysqlTable(
     paidAt: timestamp('paid_at').notNull().defaultNow(),
     notes: text('notes'),
 
-    // Admin yang mencatat pembayaran — penting untuk audit
+    // Admin yang mencatat pembayaran — penting untuk audit.
+    // Nullable + SET NULL: kalau user-nya suatu saat dihapus, riwayat
+    // pembayaran TETAP ada (cuma "dicatat oleh"-nya jadi kosong), bukan ikut
+    // terhapus atau memblokir penghapusan user.
     createdBy: bigint('created_by', { mode: 'number' })
-      .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: 'set null' }),
 
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },

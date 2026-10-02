@@ -52,6 +52,22 @@ export function useUpdateUser(tenantId: string | undefined, onSuccess?: () => vo
   });
 }
 
+export function useDeleteUser(tenantId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api.delete(`/users/${id}`, { params: tenantId ? { tenantId } : {} }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success('Pengguna berhasil dihapus');
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message;
+      toast.error(Array.isArray(msg) ? msg[0] : (msg ?? 'Gagal menghapus pengguna'));
+    },
+  });
+}
+
 export function useToggleUserActive(tenantId?: string) {
   const qc = useQueryClient();
   return useMutation({

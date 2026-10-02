@@ -56,14 +56,15 @@ export class TenantsController {
     return this.service.findAll();
   }
 
+  // me/profile = profil tenant SENDIRI (bukan kelola tenant lain), jadi
+  // dibuka untuk semua role termasuk staff — beda dengan endpoint lain di
+  // controller ini yang mengelola SELURUH tenant (tetap super_admin only).
   @Get('me/profile')
-  @Roles('super_admin', 'admin')
   getMyProfile(@CurrentUser() user: AuthUser) {
     return this.service.findOne(user.tenantId);
   }
 
   @Put('me/profile')
-  @Roles('super_admin', 'admin')
   updateMyProfile(
     @Body() dto: UpdateTenantProfileDto,
     @CurrentUser() user: AuthUser,
@@ -72,7 +73,6 @@ export class TenantsController {
   }
 
   @Post('me/profile/logo')
-  @Roles('super_admin', 'admin')
   @UseInterceptors(FileInterceptor('file', imageUploadOptions))
   uploadLogo(
     @UploadedFile() file: Express.Multer.File,
@@ -82,7 +82,6 @@ export class TenantsController {
   }
 
   @Post('me/profile/favicon')
-  @Roles('super_admin', 'admin')
   @UseInterceptors(FileInterceptor('file', imageUploadOptions))
   uploadFavicon(
     @UploadedFile() file: Express.Multer.File,

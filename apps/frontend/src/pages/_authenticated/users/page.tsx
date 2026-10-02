@@ -1,11 +1,12 @@
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, UserCog, Power, Edit2 } from 'lucide-react';
+import { Plus, UserCog, Power, Edit2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { UserForm } from './components/user-form';
-import { useUsers, useToggleUserActive } from '@/hooks/useUsers';
+import { useUsers, useToggleUserActive, useDeleteUser } from '@/hooks/useUsers';
 import type { UserRow } from '@/hooks/useUsers';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -17,8 +18,10 @@ function UsersContent() {
   const { user: currentUser } = useAuthStore();
   const { data: users, isLoading } = useUsers(tenantId);
   const toggleActive = useToggleUserActive(tenantId);
+  const deleteUser = useDeleteUser(tenantId);
   const [formOpen, setFormOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
 
   const openAdd = () => { setSelectedUser(null); setFormOpen(true); };
   const openEdit = (u: UserRow) => { setSelectedUser(u); setFormOpen(true); };
@@ -136,6 +139,19 @@ function UsersContent() {
                               <Power size={11} /> {u.isActive ? 'Nonaktifkan' : 'Aktifkan'}
                             </button>
                           )}
+                          {!isSelf && (
+                            <button
+                              onClick={() => setDeleteTarget(u)}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                                background: 'var(--surface-2)', cursor: 'pointer',
+                                fontSize: 12, color: '#EF4444',
+                              }}
+                            >
+                              <Trash2 size={11} /> Hapus
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -148,6 +164,18 @@ function UsersContent() {
       )}
 
       <UserForm open={formOpen} onClose={() => setFormOpen(false)} tenantId={tenantId} user={selectedUser} />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteUser.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
+        }}
+        loading={deleteUser.isPending}
+        title="Hapus Pengguna Permanen?"
+        description={`Akun "${deleteTarget?.name}" akan dihapus PERMANEN dan tidak bisa dikembalikan. Riwayat pembayaran/aktivitas yang pernah dibuat pengguna ini tetap tersimpan, tapi tidak lagi tertaut ke akunnya.`}
+        confirmLabel="Hapus Permanen"
+      />
     </div>
   );
 }

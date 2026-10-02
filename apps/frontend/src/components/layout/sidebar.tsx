@@ -11,27 +11,27 @@ import {
   Receipt,
 } from 'lucide-react';
 
-interface NavItem { href: string; label: string; icon: React.ElementType; }
+interface NavItem { href: string; label: string; icon: React.ElementType; staffHidden?: boolean; }
 
 const mainNav: NavItem[] = [
   { href: '/dashboard',  label: 'Dashboard',   icon: LayoutDashboard },
   { href: '/customers',  label: 'Pelanggan',   icon: Users },
-  { href: '/packages',   label: 'Paket',        icon: Package },
+  { href: '/packages',   label: 'Paket',        icon: Package, staffHidden: true },
   { href: '/billing',    label: 'Tagihan',      icon: FileText },
   { href: '/payments',   label: 'Pembayaran',   icon: CreditCard },
   { href: '/reports',    label: 'Laporan',      icon: BarChart3 },
 ];
 
 const networkNav: NavItem[] = [
-  { href: '/network/mikrotik', label: 'Mikrotik',   icon: Router },
-  { href: '/network/ip-pools', label: 'IP Pool',    icon: Network },
+  { href: '/network/mikrotik', label: 'Mikrotik',   icon: Router, staffHidden: true },
+  { href: '/network/ip-pools', label: 'IP Pool',    icon: Network, staffHidden: true },
   { href: '/network/areas',    label: 'Coverage',       icon: MapPin },
   { href: '/monitoring',       label: 'Monitoring', icon: Activity },
 ];
 
 const baseSettingsNav: NavItem[] = [
   { href: '/company-profile', label: 'Perusahaan', icon: Building2 },
-  { href: '/whatsapp',        label: 'WhatsApp',           icon: MessageCircle },
+  { href: '/whatsapp',        label: 'WhatsApp',           icon: MessageCircle, staffHidden: true },
   { href: '/activity-logs',   label: 'Activity Log',       icon: ClipboardList },
 ];
 
@@ -108,8 +108,13 @@ export function Sidebar() {
   const { close, collapsed, toggleCollapse } = useSidebar();
   const { data: profile } = useTenantProfile();
 
-  const settingsNav = user?.role === 'staff'
-    ? baseSettingsNav
+  const isStaff = user?.role === 'staff';
+  const visibleFor = (items: NavItem[]) => isStaff ? items.filter((i) => !i.staffHidden) : items;
+
+  const visibleMainNav = visibleFor(mainNav);
+  const visibleNetworkNav = visibleFor(networkNav);
+  const settingsNav = isStaff
+    ? visibleFor(baseSettingsNav)
     : [...baseSettingsNav, { href: '/users', label: 'Pengguna', icon: UserCog }];
 
   const brandName = profile?.name ?? 'Billku Tenjo';
@@ -168,8 +173,8 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
-        <Section title="Menu"        items={mainNav}       collapsed={collapsed} />
-        <Section title="Jaringan"    items={networkNav}    collapsed={collapsed} />
+        <Section title="Menu"        items={visibleMainNav}    collapsed={collapsed} />
+        <Section title="Jaringan"    items={visibleNetworkNav} collapsed={collapsed} />
         <Section title="Pengaturan"  items={settingsNav}   collapsed={collapsed} />
         {user?.role === 'super_admin' && (
           <Section title="Admin" items={superAdminNav} collapsed={collapsed} />

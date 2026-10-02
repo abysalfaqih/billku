@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe, HttpCode, HttpStatus,
+  Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -40,6 +40,16 @@ export class UsersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.update(id, dto, user, tenantId);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('tenantId') tenantId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.remove(id, user, tenantId);
   }
 
   @Put(':id/toggle-active')

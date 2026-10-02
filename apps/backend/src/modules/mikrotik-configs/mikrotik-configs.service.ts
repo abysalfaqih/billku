@@ -45,9 +45,16 @@ export class MikrotikConfigsService {
     return config;
   }
 
+  // Dipanggil siapa saja yang login (termasuk staff, buat dropdown). Makanya
+  // cuma field aman yang dikirim — password/username/radiusSecret TIDAK ikut.
+  // Detail lengkap cuma lewat findOne(), yang sudah dikunci admin-only.
   async findAll(user: AuthUser) {
     return this.db
-      .select()
+      .select({
+        id: mikrotikConfigs.id,
+        name: mikrotikConfigs.name,
+        host: mikrotikConfigs.host,
+      })
       .from(mikrotikConfigs)
       .where(and(eq(mikrotikConfigs.tenantId, user.tenantId), eq(mikrotikConfigs.isActive, true)));
   }

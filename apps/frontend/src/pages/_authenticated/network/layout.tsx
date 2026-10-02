@@ -1,14 +1,17 @@
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { Router, Network, MapPin } from 'lucide-react';
+import { useAuthStore } from '@/stores/auth.store';
 
-const tabs = [
-  { href: '/network/mikrotik', label: 'Mikrotik', icon: Router },
-  { href: '/network/ip-pools', label: 'IP Pool',  icon: Network },
+const allTabs = [
+  { href: '/network/mikrotik', label: 'Mikrotik', icon: Router, staffHidden: true },
+  { href: '/network/ip-pools', label: 'IP Pool',  icon: Network, staffHidden: true },
   { href: '/network/areas',    label: 'Area',      icon: MapPin },
 ];
 
 export default function NetworkLayout() {
   const pathname = useLocation().pathname;
+  const { user } = useAuthStore();
+  const tabs = user?.role === 'staff' ? allTabs.filter((t) => !t.staffHidden) : allTabs;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
