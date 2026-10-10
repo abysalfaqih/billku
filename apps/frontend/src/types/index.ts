@@ -263,3 +263,52 @@ export interface TenantProfile {
   about: string | null;
   bankAccounts: string | null;
 }
+
+// ─── Laporan Umur Piutang ─────────────────────────────────────────────────────
+export type AgingBucketKey =
+  | 'current' | 'd1_7' | 'd8_30' | 'd31_60' | 'd61_90' | 'd90plus';
+
+export interface AgingBucketSummary {
+  key: AgingBucketKey;
+  label: string;
+  minDays: number | null;
+  maxDays: number | null;
+  billCount: number;
+  /** Pelanggan unik yang punya minimal satu tagihan di kelompok ini */
+  customerCount: number;
+  total: number;
+}
+
+export interface AgingCustomerRow {
+  customerId: number;
+  customerCode: string | null;
+  name: string;
+  phone: string;
+  status: 'active' | 'isolated' | 'suspended' | 'terminated';
+  billCount: number;
+  total: number;
+  oldestBillId: number;
+  oldestBillNumber: string;
+  oldestDueDate: string;
+  oldestDaysOverdue: number;
+  amounts: Record<AgingBucketKey, number>;
+}
+
+export interface AgingReport {
+  summary: {
+    outstandingTotal: number;
+    outstandingBillCount: number;
+    overdueTotal: number;
+    overdueBillCount: number;
+    overdueCustomerCount: number;
+    oldestDaysOverdue: number;
+  };
+  buckets: AgingBucketSummary[];
+  customers: AgingCustomerRow[];
+  terminated: {
+    billCount: number;
+    customerCount: number;
+    total: number;
+    customers: AgingCustomerRow[];
+  };
+}

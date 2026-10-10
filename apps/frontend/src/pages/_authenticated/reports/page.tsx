@@ -4,6 +4,7 @@ import { TrendingUp, FileText, Users, Calendar } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { useRevenueReport, useBillsReport, useCustomersReport } from '@/hooks/useReports';
 import api from '@/lib/api';
+import { AgingReportSection } from './aging-report';
 
 function formatRp(v: number | string) {
   return new Intl.NumberFormat('id-ID', {
@@ -133,7 +134,7 @@ export default function ReportsPage() {
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-1)' }}>Laporan</h1>
           <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
-            Pendapatan, tagihan, dan statistik pelanggan
+            Pendapatan, tagihan, umur piutang, dan statistik pelanggan
           </p>
         </div>
 
@@ -316,6 +317,9 @@ export default function ReportsPage() {
               </div>
             </div>
           </div>
+
+          {/* Umur piutang */}
+          <AgingReportSection />
 
           {/* Rincian harian */}
           {revenue?.daily?.length > 0 && (

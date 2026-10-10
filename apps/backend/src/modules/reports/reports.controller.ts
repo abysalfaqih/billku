@@ -56,6 +56,16 @@ export class ReportsController {
     return this.reportsService.getBillsSummary(user);
   }
 
+  // Umur piutang: tunggakan per lama menunggak
+  @Get('aging')
+  async aging(@CurrentUser() user: AuthUser) {
+    if (user.role !== 'super_admin') {
+      await this.subscriptionService.checkReportsFeature(user.tenantId);
+    }
+
+    return this.reportsService.getAgingReport(user);
+  }
+
   // Statistik pelanggan
   @Get('customers')
   async customers(@CurrentUser() user: AuthUser) {

@@ -1,10 +1,12 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { eq, and, count, sql, desc } from 'drizzle-orm';
+import { eq, and, count, sql, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { payments, bills, customers } from '../../database/schema';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { ReportPeriodDto } from './dto/report-period.dto';
+import { buildAgingReport } from './aging.util';
+import type { AgingReport } from './aging.util';
 
 @Injectable()
 export class ReportsService {
@@ -109,6 +111,43 @@ export class ReportsService {
       })),
       overdueToday: overdueToday.count,
     };
+  }
+
+  // ─── Umur Piutang ─────────────────────────────────────────────────────
+
+  /**
+   * Tagihan belum lunas dikelompokkan menurut lama menunggak.
+   * Posisi "hari ini" (CURDATE() milik database, sama seperti scheduler),
+   * bukan per periode — jadi tidak terpengaruh filter tanggal di halaman.
+   * Aturan pengelompokan ada di aging.util.ts.
+   */
+  async getAgingReport(user: AuthUser): Promise<AgingReport> {
+    const rows = await this.db
+      .select({
+        billId: bills.id,
+        billNumber: bills.billNumber,
+        customerId: bills.customerId,
+        customerCode: customers.customerCode,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        customerStatus: customers.status,
+        totalAmount: bills.totalAmount,
+        // Diformat di SQL supaya tidak terkena pergeseran zona waktu driver.
+        dueDate: sql<string>`DATE_FORMAT(${bills.dueDate}, '%Y-%m-%d')`,
+        daysOverdue: sql<number>`DATEDIFF(CURDATE(), ${bills.dueDate})`,
+      })
+      .from(bills)
+      .innerJoin(customers, eq(bills.customerId, customers.id))
+      .where(
+        and(
+          eq(bills.tenantId, user.tenantId),
+          // 'overdue' = sudah ditandai scheduler; 'unpaid' = belum, tapi bisa
+          // saja sudah lewat jatuh tempo (scheduler baru jalan 00:05).
+          inArray(bills.status, ['unpaid', 'overdue']),
+        ),
+      );
+
+    return buildAgingReport(rows);
   }
 
   // ─── Pelanggan ────────────────────────────────────────────────────────
