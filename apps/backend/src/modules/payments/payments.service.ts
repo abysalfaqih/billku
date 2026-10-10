@@ -148,7 +148,7 @@ export class PaymentsService {
     },
   ): Promise<ReactivationResult> {
     try {
-      await this.customersService.enableNetworkAccess(customer);
+      await this.customersService.enableNetworkAccess({ ...customer, tenantId });
     } catch (err) {
       this.logger.error(
         `Gagal mengaktifkan kembali koneksi '${customer.usernamePppoe ?? customerId}' setelah pembayaran: ${

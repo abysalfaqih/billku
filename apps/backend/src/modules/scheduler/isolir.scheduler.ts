@@ -136,11 +136,19 @@ export class IsolirScheduler {
             const [mtkConfig] = await this.db
               .select()
               .from(mikrotikConfigs)
-              .where(eq(mikrotikConfigs.id, custInfo.mikrotikConfigId))
+              .where(and(
+                eq(mikrotikConfigs.id, custInfo.mikrotikConfigId),
+                eq(mikrotikConfigs.tenantId, item.tenantId), // jangan sentuh router tenant lain
+              ))
               .limit(1);
 
             if (mtkConfig) {
               await this.mikrotikService.disableHotspotUser(mtkConfig, item.usernamePppoe);
+            } else {
+              this.logger.warn(
+                `⚠️ '${item.usernamePppoe}': Mikrotik config #${custInfo.mikrotikConfigId} tidak ditemukan ` +
+                `untuk tenant ini — user hotspot TIDAK ikut dinonaktifkan di router`,
+              );
             }
           }
         } else {

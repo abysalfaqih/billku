@@ -215,7 +215,10 @@ export class MonitoringService {
     if (row.connectionType === 'hotspot') {
       const [config] = row.mikrotikConfigId
         ? await this.db.select().from(mikrotikConfigs)
-            .where(eq(mikrotikConfigs.id, row.mikrotikConfigId)).limit(1)
+            .where(and(
+              eq(mikrotikConfigs.id, row.mikrotikConfigId),
+              eq(mikrotikConfigs.tenantId, user.tenantId),
+            )).limit(1)
         : [null];
 
       if (!config) return { success: false, reason: 'Mikrotik tidak ditemukan' };

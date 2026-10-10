@@ -34,6 +34,7 @@ export class CustomersService {
   async create(dto: CreateCustomerDto, user: AuthUser) {
     await this.validatePackageBelongsToTenant(dto.packageId, user.tenantId);
     await this.validateAreaBelongsToTenant(dto.areaId, user.tenantId);
+    if (dto.mikrotikConfigId) await this.validateMikrotikConfigBelongsToTenant(dto.mikrotikConfigId, user.tenantId);
     if (dto.usernamePppoe) await this.ensurePppoeUnique(dto.usernamePppoe);
 
     const customerCode = await this.generateCustomerCode(user.tenantId);
@@ -205,6 +206,13 @@ export class CustomersService {
 
     if (dto.packageId) await this.validatePackageBelongsToTenant(dto.packageId, user.tenantId);
     if (dto.areaId)    await this.validateAreaBelongsToTenant(dto.areaId, user.tenantId);
+    // Hanya divalidasi kalau berubah: pelanggan lama yang nilainya tidak diubah
+    // tetap bisa diedit. Pencarian config di bawah (getHotspotMikrotikConfig)
+    // sudah dikunci per tenant, jadi nilai lama yang janggal tidak bisa dipakai
+    // untuk menyentuh router tenant lain.
+    if (dto.mikrotikConfigId && dto.mikrotikConfigId !== existing.mikrotikConfigId) {
+      await this.validateMikrotikConfigBelongsToTenant(dto.mikrotikConfigId, user.tenantId);
+    }
     if (dto.usernamePppoe && dto.usernamePppoe !== existing.usernamePppoe) {
       await this.ensurePppoeUnique(dto.usernamePppoe, id);
     }
@@ -548,7 +556,7 @@ export class CustomersService {
    * memutuskan apa yang dilakukan (mis. status pelanggan jangan diubah dulu).
    */
   async enableNetworkAccess(
-    customer: Pick<typeof customers.$inferSelect, 'connectionType' | 'usernamePppoe' | 'mikrotikConfigId'>,
+    customer: Pick<typeof customers.$inferSelect, 'tenantId' | 'connectionType' | 'usernamePppoe' | 'mikrotikConfigId'>,
   ): Promise<void> {
     // Belum punya akun jaringan → tidak ada yang perlu dipulihkan.
     if (!customer.usernamePppoe) return;
@@ -623,11 +631,17 @@ export class CustomersService {
     }
   }
 
-  private async getHotspotMikrotikConfig(customer: { mikrotikConfigId: number | null }) {
+  // Dikunci per tenant: config Mikrotik milik tenant lain TIDAK boleh ikut
+  // terambil walau id-nya tersimpan di baris pelanggan (kalau tidak, admin satu
+  // tenant bisa membuat/mengubah/menghapus user hotspot di router tenant lain).
+  private async getHotspotMikrotikConfig(customer: { mikrotikConfigId: number | null; tenantId: string }) {
     if (!customer.mikrotikConfigId) return null;
     const [config] = await this.db
       .select().from(mikrotikConfigs)
-      .where(eq(mikrotikConfigs.id, customer.mikrotikConfigId))
+      .where(and(
+        eq(mikrotikConfigs.id, customer.mikrotikConfigId),
+        eq(mikrotikConfigs.tenantId, customer.tenantId),
+      ))
       .limit(1);
     return config ?? null;
   }
@@ -691,6 +705,16 @@ export class CustomersService {
       .where(and(eq(packages.id, packageId), eq(packages.tenantId, tenantId), eq(packages.isActive, true)))
       .limit(1);
     if (!pkg) throw new NotFoundException('Paket tidak ditemukan atau tidak aktif');
+  }
+
+  // Cukup cek kepemilikan (bukan isActive): router yang dinonaktifkan tidak boleh
+  // membuat pelanggan lama yang memakainya jadi tidak bisa diedit.
+  private async validateMikrotikConfigBelongsToTenant(mikrotikConfigId: number, tenantId: string) {
+    const [config] = await this.db
+      .select({ id: mikrotikConfigs.id }).from(mikrotikConfigs)
+      .where(and(eq(mikrotikConfigs.id, mikrotikConfigId), eq(mikrotikConfigs.tenantId, tenantId)))
+      .limit(1);
+    if (!config) throw new NotFoundException('Konfigurasi Mikrotik tidak ditemukan');
   }
 
   private async validateAreaBelongsToTenant(areaId: number, tenantId: string) {
