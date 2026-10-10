@@ -91,6 +91,16 @@ export interface Payment {
   createdAt: string;
 }
 
+// Hasil pengaktifan kembali pelanggan isolir saat "Tandai Lunas" (POST /payments)
+export type PaymentReactivation =
+  | { status: 'not_needed' }
+  | { status: 'reactivated' }
+  | { status: 'failed'; message: string };
+
+export interface CreatePaymentResponse extends Payment {
+  reactivation: PaymentReactivation;
+}
+
 // Pagination
 export interface PaginatedResponse<T> {
   data: T[];

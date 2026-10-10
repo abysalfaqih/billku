@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, MoreVertical, Edit2, Trash2, Wifi, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { CustomerForm } from './components/customer-form';
 import { useCustomers, useDeleteCustomer } from '@/hooks/useCustomers';
 import type { Customer } from '@/types';
 import { useAreas } from '@/hooks/useAreas';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useExportCsv } from '@/hooks/useExportCsv';
 
 // ─── Status Tabs ──────────────────────────────────────────────────────────────
@@ -207,9 +207,13 @@ function CustomerRow({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CustomersPage() {
+  // ?search= diisi oleh pencarian topbar ("Lihat semua pelanggan untuk ...")
+  const [searchParams] = useSearchParams();
+  const urlSearch = searchParams.get('search') ?? '';
+
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState(urlSearch);
+  const [searchInput, setSearchInput] = useState(urlSearch);
   const [status, setStatus] = useState('');
   const [areaId, setAreaId] = useState('');
   const { data: areas } = useAreas(); 
@@ -222,6 +226,13 @@ export default function CustomersPage() {
     areaId: areaId ? Number(areaId) : undefined,
   });
   const deleteCustomer = useDeleteCustomer();
+
+  // Halaman ini tidak remount kalau pencarian topbar dipakai saat sudah di /customers
+  useEffect(() => {
+    setSearch(urlSearch);
+    setSearchInput(urlSearch);
+    setPage(1);
+  }, [urlSearch]);
 
   const handleSearch = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -300,7 +311,7 @@ export default function CustomersPage() {
           }}>
             <Search size={14} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
             <input
-              type="text" placeholder="Cari nama, nomor HP, email... (Enter)"
+              type="text" placeholder="Cari nama, HP, email, kode, username... (Enter)"
               value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onKeyDown={handleSearch}
               style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 13, color: 'var(--text-1)', fontFamily: 'inherit' }}
             />

@@ -1,7 +1,7 @@
 import {
   Injectable, Inject, NotFoundException, BadRequestException, ConflictException,
 } from '@nestjs/common';
-import { eq, and, count, desc, like } from 'drizzle-orm';
+import { eq, and, or, count, desc, like } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { bills, customers, packages, tenants, payments } from '../../database/schema';
@@ -64,13 +64,24 @@ export class BillingService {
   }
 
   async findAll(query: QueryBillingDto, user: AuthUser) {
-    const { page = 1, limit = 20, status, customerId } = query;
+    const { page = 1, limit = 20, status, customerId, search } = query;
     const offset = (page - 1) * limit;
+
+    const keyword = search?.trim();
+    const searchCondition = keyword
+      ? or(
+          like(bills.billNumber, `%${keyword}%`),
+          like(customers.name, `%${keyword}%`),
+          like(customers.phone, `%${keyword}%`),
+          like(customers.customerCode, `%${keyword}%`),
+        )
+      : undefined;
 
     const where = and(
       eq(bills.tenantId, user.tenantId),
       status ? eq(bills.status, status) : undefined,
       customerId ? eq(bills.customerId, customerId) : undefined,
+      searchCondition,
     );
 
     const [data, [{ total }]] = await Promise.all([
@@ -100,7 +111,10 @@ export class BillingService {
         .limit(limit)
         .offset(offset)
         .orderBy(desc(bills.createdAt)),
-      this.db.select({ total: count() }).from(bills).where(where),
+      // join customers juga di sini: kondisi pencarian memakai kolom customers
+      this.db.select({ total: count() }).from(bills)
+        .leftJoin(customers, eq(bills.customerId, customers.id))
+        .where(where),
     ]);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };

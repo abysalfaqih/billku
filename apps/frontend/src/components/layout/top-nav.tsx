@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Menu, LogOut, Users, ChevronRight, X } from 'lucide-react';
+import { Search, Menu, LogOut, Users, FileText, ChevronRight, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { useSidebar } from '@/lib/sidebar-context';
 import { useAuthStore } from '@/stores/auth.store';
 import { useLogout } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
+import type { Bill, Customer, PaginatedResponse } from '@/types';
 
 // ─── Status ──────────────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -94,51 +95,136 @@ function UserMenu() {
 }
 
 // ─── Global Search ────────────────────────────────────────────────────────────
-interface SearchResult {
-  id: number;
-  name: string;
-  phone: string;
-  status: string;
-  areaName?: string | null;
+// Mencari pelanggan (nama / No. HP / email / kode pelanggan / username) dan
+// tagihan (No. Tagihan / nama / No. HP / kode pelanggan). Memilih hasil
+// langsung membuka halaman detailnya:
+//   Pelanggan → /customers/:id
+//   Tagihan   → /customers/:id?tab=tagihan&bill=:billId
+//               (belum ada halaman detail tagihan tersendiri, jadi dibuka di tab
+//               Tagihan milik pelanggannya dan tagihan itu otomatis terbuka)
+const SEARCH_LIMIT = 5;
+
+const BILL_STATUS: Record<string, { label: string; color: string }> = {
+  unpaid:    { label: 'Belum Bayar', color: '#F59E0B' },
+  paid:      { label: 'Lunas',       color: '#10B981' },
+  overdue:   { label: 'Jatuh Tempo', color: '#EF4444' },
+  cancelled: { label: 'Dibatalkan',  color: '#9CA3AF' },
+};
+
+type SearchItem =
+  | { kind: 'customer'; key: string; to: string; data: Customer }
+  | { kind: 'bill'; key: string; to: string; data: Bill };
+
+function formatRp(v: string | number) {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency', currency: 'IDR', minimumFractionDigits: 0,
+  }).format(Number(v));
+}
+
+function GroupHeader({ icon: Icon, label, first }: { icon: React.ElementType; label: string; first?: boolean }) {
+  return (
+    <div style={{
+      padding: '8px 12px 6px', display: 'flex', alignItems: 'center', gap: 6,
+      borderBottom: '1px solid var(--border)',
+      borderTop: first ? 'none' : '1px solid var(--border)',
+      background: 'var(--surface-2)',
+    }}>
+      <Icon size={11} style={{ color: 'var(--text-3)' }} />
+      <p style={{
+        fontSize: 10, color: 'var(--text-3)', fontWeight: 700,
+        textTransform: 'uppercase', letterSpacing: '0.07em',
+      }}>
+        {label}
+      </p>
+    </div>
+  );
 }
 
 function GlobalSearch() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [items, setItems] = useState<SearchItem[]>([]);
+  const [customerTotal, setCustomerTotal] = useState(0);
+  // Kata kunci yang menghasilkan `items` saat ini — dipakai untuk mengenali hasil basi
+  const [resultsFor, setResultsFor] = useState('');
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Naik setiap ada pencarian baru → respons pencarian lama yang telat datang diabaikan
+  const requestId = useRef(0);
 
-  const doSearch = useCallback(async (q: string) => {
-    if (q.trim().length < 2) {
-      setResults([]);
+  const resetSearch = useCallback(() => {
+    requestId.current++;
+    setQuery('');
+    setItems([]);
+    setResultsFor('');
+    setOpen(false);
+    setLoading(false);
+  }, []);
+
+  const goTo = useCallback((item: SearchItem) => {
+    navigate(item.to);
+    resetSearch();
+    inputRef.current?.blur();
+  }, [navigate, resetSearch]);
+
+  const doSearch = useCallback(async (q: string, openFirst = false) => {
+    const keyword = q.trim();
+    const id = ++requestId.current;
+    if (keyword.length < 2) {
+      setItems([]);
+      setResultsFor('');
       setOpen(false);
+      setLoading(false);
       return;
     }
     setLoading(true);
-    try {
-      const { data } = await api.get('/customers', { params: { search: q, limit: 7 } });
-      const rows: SearchResult[] = data.data ?? [];
-      setResults(rows);
-      setOpen(true);
-      setSelectedIdx(-1);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
+
+    // Dua pencarian berjalan paralel; kalau salah satu gagal, yang lain tetap tampil.
+    const [cust, bill] = await Promise.allSettled([
+      api.get<PaginatedResponse<Customer>>('/customers', { params: { search: keyword, limit: SEARCH_LIMIT } }),
+      api.get<PaginatedResponse<Bill>>('/billing', { params: { search: keyword, limit: SEARCH_LIMIT } }),
+    ]);
+    if (id !== requestId.current) return; // sudah ada pencarian yang lebih baru
+
+    const customerRows = cust.status === 'fulfilled' ? cust.value.data.data ?? [] : [];
+    const billRows = bill.status === 'fulfilled' ? bill.value.data.data ?? [] : [];
+
+    const next: SearchItem[] = [
+      ...customerRows.map((c): SearchItem => ({
+        kind: 'customer', key: `c-${c.id}`, to: `/customers/${c.id}`, data: c,
+      })),
+      ...billRows.map((b): SearchItem => ({
+        kind: 'bill', key: `b-${b.id}`,
+        to: `/customers/${b.customerId}?tab=tagihan&bill=${b.id}`, data: b,
+      })),
+    ];
+
+    setItems(next);
+    setCustomerTotal(cust.status === 'fulfilled' ? cust.value.data.meta?.total ?? customerRows.length : 0);
+    setResultsFor(keyword);
+    setSelectedIdx(-1);
+    setLoading(false);
+
+    if (openFirst && next[0]) {
+      goTo(next[0]);
+      return;
     }
-  }, []);
+    setOpen(true);
+  }, [goTo]);
 
   // Debounce ketika query berubah
   useEffect(() => {
     clearTimeout(debounceRef.current);
     if (!query.trim()) {
-      setResults([]);
+      requestId.current++;
+      setItems([]);
+      setResultsFor('');
       setOpen(false);
+      setLoading(false);
       return;
     }
     debounceRef.current = setTimeout(() => doSearch(query), 280);
@@ -165,51 +251,168 @@ function GlobalSearch() {
         inputRef.current?.select();
       }
       if (e.key === 'Escape') {
-        setOpen(false);
-        setQuery('');
+        resetSearch();
         inputRef.current?.blur();
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, []);
+  }, [resetSearch]);
 
-  const navigateTo = (c: SearchResult) => {
-    navigate(`/customers?search=${encodeURIComponent(c.name)}`);
-    setOpen(false);
-    setQuery('');
-    setResults([]);
-  };
-
-  const showAll = () => {
-    if (!query.trim()) return;
-    navigate(`/customers?search=${encodeURIComponent(query)}`);
-    setOpen(false);
-    setQuery('');
+  const showAllCustomers = () => {
+    const keyword = query.trim();
+    if (!keyword) return;
+    navigate(`/customers?search=${encodeURIComponent(keyword)}`);
+    resetSearch();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIdx((p) => Math.min(p + 1, results.length - 1));
+      setSelectedIdx((p) => Math.min(p + 1, items.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIdx((p) => Math.max(p - 1, -1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (selectedIdx >= 0 && results[selectedIdx]) {
-        navigateTo(results[selectedIdx]);
+      const keyword = query.trim();
+      if (keyword.length < 2) return;
+
+      if (resultsFor === keyword) {
+        // Hasil sudah sesuai kata kunci: buka yang disorot, atau hasil teratas
+        const target = selectedIdx >= 0 ? items[selectedIdx] : items[0];
+        if (target) goTo(target);
       } else {
-        showAll();
+        // Hasil belum ada / basi (Enter ditekan sebelum debounce selesai):
+        // cari sekarang juga, lalu langsung buka hasil teratasnya.
+        clearTimeout(debounceRef.current);
+        doSearch(keyword, true);
       }
     }
   };
 
   const clearSearch = () => {
-    setQuery('');
-    setResults([]);
-    setOpen(false);
+    resetSearch();
     inputRef.current?.focus();
+  };
+
+  const customerItems = items.filter((i) => i.kind === 'customer');
+  const billItems = items.filter((i) => i.kind === 'bill');
+  const hasMoreCustomers = customerTotal > customerItems.length;
+  const dropdownStyle: React.CSSProperties = {
+    position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+    zIndex: 200, background: 'var(--surface)', border: '1px solid var(--border)',
+    borderRadius: 14, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+  };
+
+  const renderRow = (item: SearchItem) => {
+    const i = items.indexOf(item);
+    const isSelected = selectedIdx === i;
+    const rowStyle: React.CSSProperties = {
+      width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+      padding: '10px 12px', border: 'none', cursor: 'pointer',
+      textAlign: 'left', fontFamily: 'inherit',
+      background: isSelected ? 'var(--nav-active-bg)' : 'transparent',
+      transition: 'background 0.1s',
+      borderBottom: '1px solid var(--border)',
+    };
+
+    if (item.kind === 'customer') {
+      const c = item.data;
+      return (
+        <button
+          key={item.key}
+          onClick={() => goTo(item)}
+          onMouseEnter={() => setSelectedIdx(i)}
+          onMouseLeave={() => setSelectedIdx(-1)}
+          style={rowStyle}
+        >
+          <div style={{
+            width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+            background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, fontWeight: 700, color: 'white',
+          }}>
+            {c.name[0]?.toUpperCase()}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{
+              fontSize: 13, fontWeight: 600, color: 'var(--text-1)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {c.name}
+            </p>
+            <p style={{
+              fontSize: 11, color: 'var(--text-3)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {c.phone}
+              {c.areaName ? ` · ${c.areaName}` : ''}
+            </p>
+          </div>
+
+          <span style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            fontSize: 11, color: STATUS_DOT[c.status] ?? '#9CA3AF',
+            flexShrink: 0,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: STATUS_DOT[c.status] ?? '#9CA3AF',
+            }} />
+            {STATUS_LABEL[c.status] ?? c.status}
+          </span>
+        </button>
+      );
+    }
+
+    const b = item.data;
+    const st = BILL_STATUS[b.status] ?? { label: b.status, color: '#9CA3AF' };
+    return (
+      <button
+        key={item.key}
+        onClick={() => goTo(item)}
+        onMouseEnter={() => setSelectedIdx(i)}
+        onMouseLeave={() => setSelectedIdx(-1)}
+        style={rowStyle}
+      >
+        <div style={{
+          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+          background: 'var(--nav-active-bg)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <FileText size={15} style={{ color: 'var(--nav-active-icon)' }} />
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{
+            fontSize: 13, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'monospace',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {b.billNumber}
+          </p>
+          <p style={{
+            fontSize: 11, color: 'var(--text-3)',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {b.customerName ?? '—'} · {b.packageName}
+          </p>
+        </div>
+
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>
+            {formatRp(b.totalAmount)}
+          </p>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: st.color,
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: st.color }} />
+            {st.label}
+          </span>
+        </div>
+      </button>
+    );
   };
 
   return (
@@ -227,10 +430,10 @@ function GlobalSearch() {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Cari pelanggan... (⌘K)"
+          placeholder="Cari pelanggan atau tagihan... (⌘K)"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => { if (results.length > 0) setOpen(true); }}
+          onFocus={() => { if (items.length > 0) setOpen(true); }}
           onKeyDown={handleKeyDown}
           style={{
             flex: 1, background: 'transparent', border: 'none', outline: 'none',
@@ -261,114 +464,51 @@ function GlobalSearch() {
       </div>
 
       {/* Dropdown */}
-      {open && results.length > 0 && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
-          zIndex: 200, background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 14, overflow: 'hidden',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
-        }}>
-          {/* Header */}
-          <div style={{
-            padding: '8px 12px 6px', display: 'flex', alignItems: 'center', gap: 6,
-            borderBottom: '1px solid var(--border)',
-          }}>
-            <Users size={11} style={{ color: 'var(--text-3)' }} />
-            <p style={{
-              fontSize: 10, color: 'var(--text-3)', fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '0.07em',
-            }}>
-              Pelanggan
-            </p>
-          </div>
+      {open && items.length > 0 && (
+        <div style={dropdownStyle}>
+          {customerItems.length > 0 && (
+            <>
+              <GroupHeader icon={Users} label="Pelanggan" first />
+              {customerItems.map(renderRow)}
+            </>
+          )}
 
-          {/* Hasil */}
-          {results.map((c, i) => {
-            const isSelected = selectedIdx === i;
-            return (
-              <button
-                key={c.id}
-                onClick={() => navigateTo(c)}
-                onMouseEnter={() => setSelectedIdx(i)}
-                onMouseLeave={() => setSelectedIdx(-1)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 12px', border: 'none', cursor: 'pointer',
-                  textAlign: 'left', fontFamily: 'inherit',
-                  background: isSelected ? 'var(--nav-active-bg)' : 'transparent',
-                  transition: 'background 0.1s',
-                  borderBottom: '1px solid var(--border)',
-                }}
-              >
-                {/* Avatar */}
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                  background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, fontWeight: 700, color: 'white',
-                }}>
-                  {c.name[0]?.toUpperCase()}
-                </div>
+          {billItems.length > 0 && (
+            <>
+              <GroupHeader icon={FileText} label="Tagihan" first={customerItems.length === 0} />
+              {billItems.map(renderRow)}
+            </>
+          )}
 
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{
-                    fontSize: 13, fontWeight: 600, color: 'var(--text-1)',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>
-                    {c.name}
-                  </p>
-                  <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                    {c.phone}
-                    {c.areaName ? ` · ${c.areaName}` : ''}
-                  </p>
-                </div>
-
-                {/* Status */}
-                <span style={{
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  fontSize: 11, color: STATUS_DOT[c.status] ?? '#9CA3AF',
-                  flexShrink: 0,
-                }}>
-                  <span style={{
-                    width: 6, height: 6, borderRadius: '50%',
-                    background: STATUS_DOT[c.status] ?? '#9CA3AF',
-                  }} />
-                  {STATUS_LABEL[c.status] ?? c.status}
-                </span>
-              </button>
-            );
-          })}
-
-          {/* Lihat semua */}
-          <button
-            onClick={showAll}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 12px', border: 'none', cursor: 'pointer',
-              background: 'var(--surface-2)', fontFamily: 'inherit',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--nav-hover)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
-          >
-            <p style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 500 }}>
-              Lihat semua hasil untuk "<strong style={{ color: 'var(--text-1)' }}>{query}</strong>"
-            </p>
-            <ChevronRight size={13} style={{ color: 'var(--text-3)' }} />
-          </button>
+          {/* Lihat semua (hanya kalau pelanggan yang cocok lebih banyak dari yang ditampilkan) */}
+          {hasMoreCustomers && (
+            <button
+              onClick={showAllCustomers}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 12px', border: 'none', cursor: 'pointer',
+                background: 'var(--surface-2)', fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--nav-hover)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
+            >
+              <p style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 500 }}>
+                Lihat semua {customerTotal} pelanggan untuk "<strong style={{ color: 'var(--text-1)' }}>{query.trim()}</strong>"
+              </p>
+              <ChevronRight size={13} style={{ color: 'var(--text-3)' }} />
+            </button>
+          )}
         </div>
       )}
 
       {/* Tidak ada hasil */}
-      {open && !loading && query.length >= 2 && results.length === 0 && (
+      {open && !loading && query.trim().length >= 2 && items.length === 0 && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
-          zIndex: 200, background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 14, padding: '20px 16px', textAlign: 'center',
+          ...dropdownStyle, padding: '20px 16px', textAlign: 'center',
           boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
         }}>
           <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
-            Tidak ada pelanggan dengan nama "<strong>{query}</strong>"
+            Tidak ada pelanggan atau tagihan untuk "<strong>{query.trim()}</strong>"
           </p>
         </div>
       )}

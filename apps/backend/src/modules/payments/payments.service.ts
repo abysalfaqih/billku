@@ -1,6 +1,8 @@
 import {
   Injectable,
   Inject,
+  HttpException,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -8,7 +10,7 @@ import { eq, and, count, desc } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { payments, bills, customers } from '../../database/schema';
-import { RadiusService } from '../radius/radius.service';
+import { CustomersService } from '../customers/customers.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappTemplatesService } from '../whatsapp-templates/whatsapp-templates.service';
 import { formatRupiah } from '../whatsapp-templates/whatsapp-templates.defaults';
@@ -16,11 +18,25 @@ import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { CreatePaymentDto } from './dto/create-payment.dto';
 import type { QueryPaymentDto } from './dto/query-payment.dto';
 
+/**
+ * Hasil pengaktifan kembali pelanggan isolir saat tagihan ditandai lunas.
+ *  - not_needed : pelanggan tidak sedang isolir
+ *  - reactivated: koneksi sudah dipulihkan DAN status pelanggan kembali 'active'
+ *  - failed     : pembayaran tetap tercatat, tapi koneksi gagal dipulihkan
+ *                 (router/RADIUS tidak terjangkau) → status pelanggan TETAP 'isolated'
+ */
+export type ReactivationResult =
+  | { status: 'not_needed' }
+  | { status: 'reactivated' }
+  | { status: 'failed'; message: string };
+
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     @Inject(DRIZZLE) private db: DrizzleClient,
-    private radiusService: RadiusService,
+    private customersService: CustomersService,
     private whatsappService: WhatsAppService,
     private whatsappTemplatesService: WhatsappTemplatesService,
   ) {}
@@ -45,13 +61,16 @@ export class PaymentsService {
       throw new BadRequestException('Tagihan yang dibatalkan tidak bisa dibayar');
     }
 
-    // Ambil customer untuk cek PPPoE username
+    // Ambil customer: status & data akun jaringan (untuk pengaktifan kembali
+    // kalau sedang isolir) + nama/HP untuk notifikasi WA
     const [customer] = await this.db
       .select({
         status: customers.status,
+        connectionType: customers.connectionType,
+        mikrotikConfigId: customers.mikrotikConfigId,
         usernamePppoe: customers.usernamePppoe,
-        name: customers.name,      // ← tambahkan
-        phone: customers.phone,    // ← tambahkan
+        name: customers.name,
+        phone: customers.phone,
       })
       .from(customers)
       .where(eq(customers.id, bill.customerId))
@@ -74,22 +93,10 @@ export class PaymentsService {
       .set({ status: 'paid', updatedAt: new Date() })
       .where(eq(bills.id, bill.id));
 
-    // Jika pelanggan sedang diisolir → aktifkan kembali
+    // Jika pelanggan sedang diisolir → aktifkan kembali (koneksi + status)
+    let reactivation: ReactivationResult = { status: 'not_needed' };
     if (customer?.status === 'isolated') {
-      await this.db
-        .update(customers)
-        .set({ status: 'active', updatedAt: new Date() })
-        .where(
-          and(
-            eq(customers.id, bill.customerId),
-            eq(customers.status, 'isolated'),
-          ),
-        );
-
-      // Enable di FreeRADIUS → pelanggan bisa reconnect PPPoE
-      if (customer.usernamePppoe) {
-        await this.radiusService.enableUser(customer.usernamePppoe);
-      }
+      reactivation = await this.reactivateIsolatedCustomer(bill.customerId, user.tenantId, customer);
     }
 
     // Kirim WA notifikasi pembayaran
@@ -117,7 +124,58 @@ export class PaymentsService {
       });
     }
 
-    return this.findOne(Number(result.insertId), user);
+    const payment = await this.findOne(Number(result.insertId), user);
+    return { ...payment, reactivation };
+  }
+
+  /**
+   * Pulihkan koneksi pelanggan isolir yang baru melunasi tagihan.
+   *
+   * Urutan sengaja: koneksi (Mikrotik/RADIUS) dipulihkan DULU, baru status di
+   * database diubah ke 'active'. Dengan begitu status 'active' berarti internet
+   * memang sudah dibuka — bukan cuma label di database. Kalau pemulihan koneksi
+   * gagal, status dibiarkan 'isolated' (pembayaran tetap tercatat) dan pemanggil
+   * diberi tahu lewat hasil 'failed'; admin bisa mencoba lagi lewat
+   * Edit Pelanggan → Status → Aktif, yang memakai jalur pemulihan yang sama.
+   */
+  private async reactivateIsolatedCustomer(
+    customerId: number,
+    tenantId: string,
+    customer: {
+      connectionType: 'pppoe' | 'hotspot';
+      mikrotikConfigId: number | null;
+      usernamePppoe: string | null;
+    },
+  ): Promise<ReactivationResult> {
+    try {
+      await this.customersService.enableNetworkAccess(customer);
+    } catch (err) {
+      this.logger.error(
+        `Gagal mengaktifkan kembali koneksi '${customer.usernamePppoe ?? customerId}' setelah pembayaran: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      // Pesan error mentah dari driver (Drizzle/RouterOS) bisa memuat SQL/host —
+      // cukup tampilkan pesan yang memang ditulis untuk admin (HttpException),
+      // detail lengkapnya sudah ada di log server.
+      return {
+        status: 'failed',
+        message: err instanceof HttpException ? err.message : 'Mikrotik/RADIUS tidak dapat dihubungi',
+      };
+    }
+
+    await this.db
+      .update(customers)
+      .set({ status: 'active', updatedAt: new Date() })
+      .where(
+        and(
+          eq(customers.id, customerId),
+          eq(customers.tenantId, tenantId),
+          eq(customers.status, 'isolated'),
+        ),
+      );
+
+    return { status: 'reactivated' };
   }
 
   async findAll(query: QueryPaymentDto, user: AuthUser) {

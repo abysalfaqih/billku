@@ -1,4 +1,4 @@
-import { IsOptional, IsEnum, IsInt, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsInt, Min, IsString, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryBillingDto {
@@ -23,4 +23,11 @@ export class QueryBillingDto {
   @Type(() => Number)
   @IsInt()
   customerId?: number;
+
+  // Cari berdasarkan No. Tagihan, nama / No. HP / kode pelanggan (dipakai
+  // pencarian topbar). Panjang dibatasi supaya pola LIKE tidak berlebihan.
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Wifi, FileText, CreditCard, CheckCircle2, Clock,
@@ -58,10 +58,28 @@ function InfoItem({ icon: Icon, label, value }: { icon: React.ElementType; label
   );
 }
 
-function BillRow({ bill }: { bill: any }) {
-  const [open, setOpen] = useState(false);
+function BillRow({ bill, highlighted = false }: { bill: any; highlighted?: boolean }) {
+  // `highlighted`: tagihan yang dituju dari pencarian topbar — langsung terbuka & disorot
+  const [open, setOpen] = useState(highlighted);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    setOpen(true);
+    rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlighted]);
+
   return (
-    <div style={{ borderBottom: '1px solid var(--border)' }}>
+    <div
+      ref={rowRef}
+      style={{
+        borderBottom: '1px solid var(--border)',
+        ...(highlighted ? {
+          background: 'var(--nav-active-bg)', borderRadius: 10,
+          padding: '0 10px', margin: '0 -10px',
+        } : {}),
+      }}
+    >
       <button
         onClick={() => setOpen(p => !p)}
         style={{
@@ -135,7 +153,15 @@ export default function CustomerDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [tab, setTab] = useState<'info' | 'tagihan' | 'pembayaran'>('info');
+  // ?tab=tagihan&bill=<id> dikirim oleh pencarian topbar saat hasilnya sebuah tagihan
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const highlightBillId = Number(searchParams.get('bill')) || null;
+  const [tab, setTab] = useState<'info' | 'tagihan' | 'pembayaran'>(
+    tabParam === 'tagihan' || tabParam === 'pembayaran' || tabParam === 'info'
+      ? tabParam
+      : highlightBillId ? 'tagihan' : 'info',
+  );
   const [resetPassOpen, setResetPassOpen] = useState(false);
   const [newPassword, setNewPassword]     = useState('');
   const resetPass = useResetPassword(() => { setResetPassOpen(false); setNewPassword(''); });
@@ -145,6 +171,13 @@ export default function CustomerDetailPage() {
     queryFn: () => api.get(`/customers/${params.id}/detail`).then(r => r.data),
     enabled: !!params.id,
   });
+
+  // Halaman ini tidak remount kalau pencarian topbar dipakai saat sudah di halaman detail
+  // (mis. pindah dari satu hasil ke hasil lain milik pelanggan yang sama)
+  useEffect(() => {
+    if (tabParam === 'tagihan' || tabParam === 'pembayaran' || tabParam === 'info') setTab(tabParam);
+    else if (highlightBillId) setTab('tagihan');
+  }, [tabParam, highlightBillId]);
 
   const handleGenerateBill = async () => {
     if (!data) return;
@@ -408,7 +441,7 @@ export default function CustomerDetailPage() {
                     <FileText size={28} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
                     <p style={{ fontSize: 13 }}>Belum ada riwayat tagihan</p>
                   </div>
-                ) : bills.map((b: any) => <BillRow key={b.id} bill={b} />)}
+                ) : bills.map((b: any) => <BillRow key={b.id} bill={b} highlighted={b.id === highlightBillId} />)}
               </div>
             )}
 

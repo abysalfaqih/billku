@@ -114,6 +114,8 @@ export class CustomersService {
         like(customers.name, `%${search}%`),
         like(customers.phone, `%${search}%`),
         like(customers.email, `%${search}%`),
+        like(customers.customerCode, `%${search}%`),
+        like(customers.usernamePppoe, `%${search}%`),
       );
     }
 
@@ -525,6 +527,42 @@ export class CustomersService {
     }
 
     return { message: 'Password berhasil direset' };
+  }
+
+  // ─── Akses Jaringan ────────────────────────────────────────────────────────
+
+  /**
+   * Pulihkan akses internet pelanggan yang sebelumnya diisolir/dinonaktifkan —
+   * kebalikan dari proses isolir (IsolirScheduler / Edit Pelanggan → status
+   * bukan 'active'):
+   *   - Hotspot : enable user di Mikrotik yang dipilih pelanggan (user hotspot
+   *               tidak ada di RADIUS, jadi RADIUS saja tidak cukup).
+   *   - PPPoE   : hapus 'Auth-Type := Reject' di RADIUS.
+   *
+   * Dipakai oleh "Tandai Lunas" (PaymentsService) supaya pelanggan isolir yang
+   * sudah bayar benar-benar tersambung lagi, bukan hanya berubah status di
+   * database. Method ini TIDAK mengubah kolom status — pemanggil yang
+   * memutuskan kapan status di DB diubah.
+   *
+   * THROW kalau Mikrotik/RADIUS gagal dihubungi, supaya pemanggil bisa
+   * memutuskan apa yang dilakukan (mis. status pelanggan jangan diubah dulu).
+   */
+  async enableNetworkAccess(
+    customer: Pick<typeof customers.$inferSelect, 'connectionType' | 'usernamePppoe' | 'mikrotikConfigId'>,
+  ): Promise<void> {
+    // Belum punya akun jaringan → tidak ada yang perlu dipulihkan.
+    if (!customer.usernamePppoe) return;
+
+    if (customer.connectionType === 'hotspot') {
+      const mtk = await this.getHotspotMikrotikConfig(customer);
+      if (!mtk) {
+        throw new NotFoundException('Mikrotik untuk pelanggan hotspot ini tidak ditemukan (cek pengaturan Mikrotik pelanggan)');
+      }
+      await this.mikrotikService.enableHotspotUser(mtk, customer.usernamePppoe);
+      return;
+    }
+
+    await this.radiusService.enableUser(customer.usernamePppoe);
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
