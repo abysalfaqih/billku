@@ -87,8 +87,11 @@ export interface Payment {
   paymentMethod: 'cash' | 'transfer' | 'other';
   paidAt: string;
   notes: string | null;
-  createdBy: number;
+  createdBy: number | null;
   createdAt: string;
+  // Hanya ada di daftar pembayaran (GET /payments)
+  billNumber?: string | null;
+  createdByName?: string | null;
 }
 
 // Hasil pengaktifan kembali pelanggan isolir saat "Tandai Lunas" (POST /payments)
@@ -311,4 +314,30 @@ export interface AgingReport {
     total: number;
     customers: AgingCustomerRow[];
   };
+}
+
+// ─── Detail Tagihan (GET /billing/:id/detail) ─────────────────────────────────
+export interface BillDetailPayment {
+  id: number;
+  amount: string;
+  paymentMethod: 'cash' | 'transfer' | 'other';
+  paidAt: string;
+  notes: string | null;
+  createdBy: number | null;
+  createdByName: string | null;
+}
+
+export interface BillDetail {
+  bill: Bill;
+  customer: {
+    id: number;
+    customerCode: string | null;
+    name: string;
+    phone: string;
+    address: string | null;
+    status: 'active' | 'isolated' | 'suspended' | 'terminated';
+  } | null;
+  payments: BillDetailPayment[];
+  /** Positif = terlambat, 0 = jatuh tempo hari ini, negatif = belum jatuh tempo */
+  daysOverdue: number;
 }

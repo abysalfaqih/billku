@@ -1,10 +1,10 @@
 import {
   Injectable, Inject, NotFoundException, BadRequestException, ConflictException,
 } from '@nestjs/common';
-import { eq, and, or, count, desc, like } from 'drizzle-orm';
+import { eq, and, or, count, desc, like, sql } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { bills, customers, packages, tenants, payments } from '../../database/schema';
+import { bills, customers, packages, tenants, payments, users } from '../../database/schema';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { QueryBillingDto } from './dto/query-billing.dto';
 import { buildInvoicePdf } from './invoice-pdf.util';
@@ -147,6 +147,59 @@ export class BillingService {
       .limit(1);
     if (!bill) throw new NotFoundException(`Tagihan #${id} tidak ditemukan`);
     return bill;
+  }
+
+  /**
+   * Data untuk halaman detail tagihan: tagihan + pelanggan + riwayat pembayaran.
+   * Sama polanya dengan GET /customers/:id/detail — satu panggilan, semua
+   * dibatasi tenant.
+   */
+  async getDetail(id: number, user: AuthUser) {
+    // findOne sudah memfilter tenant & melempar 404 kalau tidak ada
+    const bill = await this.findOne(id, user);
+
+    const [[customer], billPayments, [overdue]] = await Promise.all([
+      this.db
+        .select({
+          id: customers.id,
+          customerCode: customers.customerCode,
+          name: customers.name,
+          phone: customers.phone,
+          address: customers.address,
+          status: customers.status,
+        })
+        .from(customers)
+        .where(and(eq(customers.id, bill.customerId), eq(customers.tenantId, user.tenantId)))
+        .limit(1),
+      this.db
+        .select({
+          id: payments.id,
+          amount: payments.amount,
+          paymentMethod: payments.paymentMethod,
+          paidAt: payments.paidAt,
+          notes: payments.notes,
+          createdBy: payments.createdBy,
+          createdByName: users.name,
+        })
+        .from(payments)
+        .leftJoin(users, eq(payments.createdBy, users.id))
+        .where(and(eq(payments.billId, id), eq(payments.tenantId, user.tenantId)))
+        .orderBy(desc(payments.paidAt)),
+      // Selisih hari dihitung oleh database (CURDATE()), sama seperti scheduler
+      // dan laporan umur piutang: positif = terlambat, negatif = belum jatuh tempo.
+      this.db
+        .select({ daysOverdue: sql<number>`DATEDIFF(CURDATE(), ${bills.dueDate})` })
+        .from(bills)
+        .where(and(eq(bills.id, id), eq(bills.tenantId, user.tenantId)))
+        .limit(1),
+    ]);
+
+    return {
+      bill,
+      customer: customer ?? null,
+      payments: billPayments,
+      daysOverdue: Number(overdue?.daysOverdue ?? 0),
+    };
   }
 
   async cancel(id: number, user: AuthUser) {

@@ -7,6 +7,7 @@ interface PaymentParams {
   page?: number;
   limit?: number;
   customerId?: number;
+  search?: string;
 }
 
 export function usePayments(params: PaymentParams) {
@@ -24,6 +25,7 @@ export function useCreatePayment(onSuccess?: () => void) {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['payments'] });
       qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['bill-detail'] });
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['customer-detail'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });

@@ -1,16 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, XCircle, CheckCircle2, FileText, FileDown, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
+import { SearchInput } from '@/components/ui/search-input';
 import { GenerateDialog } from './components/generate-dialog';
 import { PayDialog } from './components/pay-dialog';
-import { useBills, useCancelBill } from '@/hooks/useBilling';
+import { useBills, useCancelBill, openInvoicePdf } from '@/hooks/useBilling';
 import type { Bill } from '@/types';
-import { Link } from 'react-router-dom';
-import api from '@/lib/api';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useExportCsv } from '@/hooks/useExportCsv';
 
 const STATUS_TABS = [
@@ -32,28 +32,36 @@ function formatDate(d: string) {
 }
 
 export default function BillingPage() {
+  // ?search= bisa diisi dari tautan lain (mis. "Lihat semua tagihan" di pencarian atas)
+  const [searchParams] = useSearchParams();
+  const urlSearch = searchParams.get('search') ?? '';
+
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState(urlSearch);
+  const [searchInput, setSearchInput] = useState(urlSearch);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [payTarget, setPayTarget] = useState<Bill | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Bill | null>(null);
   const exportBilling = useExportCsv('/billing/export', `tagihan-${new Date().toISOString().split('T')[0]}.csv`);
 
-  const { data, isLoading } = useBills({ page, limit: 20, status: status || undefined });
+  const { data, isLoading } = useBills({ page, limit: 20, status: status || undefined, search: search || undefined });
   const cancelBill = useCancelBill();
+
+  // Halaman ini tidak remount kalau ?search= berubah saat sudah di /billing
+  useEffect(() => {
+    setSearch(urlSearch);
+    setSearchInput(urlSearch);
+    setPage(1);
+  }, [urlSearch]);
+
+  const submitSearch = (v: string) => {
+    setSearch(v.trim());
+    setPage(1);
+  };
 
   const statusVariant: Record<string, 'paid' | 'unpaid' | 'overdue' | 'cancelled'> = {
     paid: 'paid', unpaid: 'unpaid', overdue: 'overdue', cancelled: 'cancelled',
-  };
-
-  const handleViewInvoice = async (billId: number) => {
-    try {
-      const res = await api.get(`/billing/${billId}/invoice`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      window.open(url, '_blank');
-    } catch {
-      alert('Gagal membuka invoice');
-    }
   };
 
   return (
@@ -104,6 +112,17 @@ export default function BillingPage() {
           </div>
         </div>
 
+        {/* Search bar */}
+        <div style={{ padding: '12px 24px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex' }}>
+          <SearchInput
+            value={searchInput}
+            onChange={setSearchInput}
+            onSubmit={submitSearch}
+            active={!!search}
+            placeholder="Cari no. tagihan, nama, HP, kode pelanggan... (Enter)"
+          />
+        </div>
+
         {/* Table */}
         <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px 24px' }}>
           {isLoading ? (
@@ -116,9 +135,13 @@ export default function BillingPage() {
               background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)',
             }}>
               <FileText size={32} style={{ color: 'var(--text-3)', margin: '0 auto 12px' }} />
-              <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)' }}>Belum ada tagihan</p>
+              <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)' }}>
+                {search ? 'Tagihan tidak ditemukan' : 'Belum ada tagihan'}
+              </p>
               <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
-                Klik "Generate Tagihan" untuk membuat tagihan baru
+                {search
+                  ? `Tidak ada hasil untuk "${search}"`
+                  : 'Klik "Generate Tagihan" untuk membuat tagihan baru'}
               </p>
             </div>
           ) : (
@@ -131,8 +154,8 @@ export default function BillingPage() {
                 <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                      {['No. Tagihan', 'Pelanggan', 'Periode', 'Jatuh Tempo', 'Paket', 'Jumlah', 'Status', ''].map((h) => (
-                        <th key={h} style={{
+                      {['No. Tagihan', 'Pelanggan', 'Periode', 'Jatuh Tempo', 'Paket', 'Jumlah', 'Status', '', ''].map((h, i) => (
+                        <th key={`${h}-${i}`} style={{
                           padding: '10px 16px', textAlign: 'left', fontSize: 11,
                           fontWeight: 700, color: 'var(--text-3)', letterSpacing: '0.05em',
                           textTransform: 'uppercase', whiteSpace: 'nowrap',
@@ -149,12 +172,17 @@ export default function BillingPage() {
                         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                       >
                         <td style={{ padding: '12px 16px' }}>
-                          <span style={{
-                            fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
-                            color: 'var(--nav-active-text)',
-                          }}>
+                          <Link
+                            to={`/billing/${bill.id}`}
+                            style={{
+                              fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+                              color: 'var(--nav-active-text)', textDecoration: 'none',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                          >
                             {bill.billNumber}
-                          </span>
+                          </Link>
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           {bill.customerName ? (
@@ -193,7 +221,7 @@ export default function BillingPage() {
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           <button
-                            onClick={() => handleViewInvoice(bill.id)}
+                            onClick={() => openInvoicePdf(bill.id)}
                             style={{
                               display: 'flex',
                               alignItems: 'center',

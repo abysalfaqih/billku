@@ -1,12 +1,13 @@
-import { useState } from 'react';
-import { CreditCard, Search, Download } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { CreditCard, Download } from 'lucide-react';
 import { Pagination } from '@/components/ui/pagination';
+import { SearchInput } from '@/components/ui/search-input';
 import { Spinner } from '@/components/ui/spinner';
 import { usePayments } from '@/hooks/usePayments';
 import { useExportCsv } from '@/hooks/useExportCsv';
 import { Button } from '@/components/ui/button';
 import type { Payment } from '@/types';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 function formatRp(v: string | number) {
   return new Intl.NumberFormat('id-ID', {
@@ -28,8 +29,26 @@ const METHOD_LABEL: Record<string, string> = {
 };
 
 export default function PaymentsPage() {
+  // ?search= bisa diisi dari tautan lain
+  const [searchParams] = useSearchParams();
+  const urlSearch = searchParams.get('search') ?? '';
+
   const [page, setPage] = useState(1);
-  const { data, isLoading } = usePayments({ page, limit: 20 });
+  const [search, setSearch] = useState(urlSearch);
+  const [searchInput, setSearchInput] = useState(urlSearch);
+  const { data, isLoading } = usePayments({ page, limit: 20, search: search || undefined });
+
+  // Halaman ini tidak remount kalau ?search= berubah saat sudah di /payments
+  useEffect(() => {
+    setSearch(urlSearch);
+    setSearchInput(urlSearch);
+    setPage(1);
+  }, [urlSearch]);
+
+  const submitSearch = (v: string) => {
+    setSearch(v.trim());
+    setPage(1);
+  };
   const exportCsv = useExportCsv('/payments/export', `pembayaran-${new Date().toISOString().split('T')[0]}.csv`);
 
   return (
@@ -55,6 +74,17 @@ export default function PaymentsPage() {
         </div>
       </div>
 
+      {/* Search bar */}
+      <div style={{ padding: '12px 24px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex' }}>
+        <SearchInput
+          value={searchInput}
+          onChange={setSearchInput}
+          onSubmit={submitSearch}
+          active={!!search}
+          placeholder="Cari no. tagihan, nama, HP, kode pelanggan... (Enter)"
+        />
+      </div>
+
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px 24px' }}>
         {isLoading ? (
@@ -68,10 +98,12 @@ export default function PaymentsPage() {
           }}>
             <CreditCard size={32} style={{ color: 'var(--text-3)', margin: '0 auto 12px' }} />
             <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)' }}>
-              Belum ada pembayaran
+              {search ? 'Pembayaran tidak ditemukan' : 'Belum ada pembayaran'}
             </p>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
-              Tandai tagihan sebagai lunas untuk mencatat pembayaran
+              {search
+                ? `Tidak ada hasil untuk "${search}"`
+                : 'Tandai tagihan sebagai lunas untuk mencatat pembayaran'}
             </p>
           </div>
         ) : (
@@ -131,12 +163,17 @@ export default function PaymentsPage() {
                         </div>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          fontSize: 12, fontFamily: 'monospace', color: 'var(--nav-active-text)',
-                          fontWeight: 600,
-                        }}>
-                          #{payment.billId}
-                        </span>
+                        <Link
+                          to={`/billing/${payment.billId}`}
+                          style={{
+                            fontSize: 12, fontFamily: 'monospace', color: 'var(--nav-active-text)',
+                            fontWeight: 600, textDecoration: 'none',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                        >
+                          {payment.billNumber ?? `#${payment.billId}`}
+                        </Link>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
@@ -152,7 +189,7 @@ export default function PaymentsPage() {
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          Admin #{payment.createdBy}
+                          {payment.createdByName ?? '—'}
                         </span>
                       </td>
                     </tr>

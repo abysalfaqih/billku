@@ -40,6 +40,11 @@ export class BillingController {
     return this.billingService.findOne(id, user);
   }
 
+  @Get(':id/detail')
+  detail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.billingService.getDetail(id, user);
+  }
+
   @Get(':id/invoice')
   async downloadInvoice(
     @Param('id', ParseIntPipe) id: number,

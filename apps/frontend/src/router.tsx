@@ -17,6 +17,7 @@ const DashboardLayout = lazy(() => import('@/pages/_authenticated/layout'));
 const DashboardPage = lazy(() => import('@/pages/_authenticated/dashboard/page'));
 const ActivityLogsPage = lazy(() => import('@/pages/_authenticated/activity-logs/page'));
 const BillingPage = lazy(() => import('@/pages/_authenticated/billing/page'));
+const BillDetailPage = lazy(() => import('@/pages/_authenticated/billing/id/page'));
 const CompanyProfilePage = lazy(() => import('@/pages/_authenticated/company-profile/page'));
 const CustomersPage = lazy(() => import('@/pages/_authenticated/customers/page'));
 const CustomerDetailPage = lazy(() => import('@/pages/_authenticated/customers/id/page'));
@@ -76,6 +77,7 @@ export const router = createBrowserRouter([
       { path: '/dashboard', element: withSuspense(DashboardPage) },
       { path: '/activity-logs', element: withSuspense(ActivityLogsPage) },
       { path: '/billing', element: withSuspense(BillingPage) },
+      { path: '/billing/:id', element: withSuspense(BillDetailPage) },
       { path: '/company-profile', element: withSuspense(CompanyProfilePage) },
       { path: '/customers', element: withSuspense(CustomersPage) },
       { path: '/customers/:id', element: withSuspense(CustomerDetailPage) },

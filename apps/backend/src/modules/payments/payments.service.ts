@@ -6,10 +6,10 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { eq, and, count, desc } from 'drizzle-orm';
+import { eq, and, or, count, desc, like } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { payments, bills, customers } from '../../database/schema';
+import { payments, bills, customers, users } from '../../database/schema';
 import { CustomersService } from '../customers/customers.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappTemplatesService } from '../whatsapp-templates/whatsapp-templates.service';
@@ -179,12 +179,23 @@ export class PaymentsService {
   }
 
   async findAll(query: QueryPaymentDto, user: AuthUser) {
-    const { page = 1, limit = 20, customerId } = query;
+    const { page = 1, limit = 20, customerId, search } = query;
     const offset = (page - 1) * limit;
+
+    const keyword = search?.trim();
+    const searchCondition = keyword
+      ? or(
+          like(bills.billNumber, `%${keyword}%`),
+          like(customers.name, `%${keyword}%`),
+          like(customers.phone, `%${keyword}%`),
+          like(customers.customerCode, `%${keyword}%`),
+        )
+      : undefined;
 
     const where = and(
       eq(payments.tenantId, user.tenantId),
       customerId ? eq(payments.customerId, customerId) : undefined,
+      searchCondition,
     );
 
     const [data, [{ total }]] = await Promise.all([
@@ -193,6 +204,7 @@ export class PaymentsService {
           id: payments.id,
           tenantId: payments.tenantId,
           billId: payments.billId,
+          billNumber: bills.billNumber,
           customerId: payments.customerId,
           customerName: customers.name, // ← BARU: sebelumnya tidak pernah di-select, makanya di FE cuma muncul ID
           amount: payments.amount,
@@ -200,15 +212,24 @@ export class PaymentsService {
           paidAt: payments.paidAt,
           notes: payments.notes,
           createdBy: payments.createdBy,
+          createdByName: users.name,
           createdAt: payments.createdAt,
         })
         .from(payments)
         .leftJoin(customers, eq(payments.customerId, customers.id))
+        .leftJoin(bills, eq(payments.billId, bills.id))
+        .leftJoin(users, eq(payments.createdBy, users.id))
         .where(where)
         .limit(limit)
         .offset(offset)
         .orderBy(desc(payments.paidAt)),
-      this.db.select({ total: count() }).from(payments).where(where),
+      // join customers & bills juga di sini: kondisi pencarian memakai kolomnya
+      this.db
+        .select({ total: count() })
+        .from(payments)
+        .leftJoin(customers, eq(payments.customerId, customers.id))
+        .leftJoin(bills, eq(payments.billId, bills.id))
+        .where(where),
     ]);
 
     return {

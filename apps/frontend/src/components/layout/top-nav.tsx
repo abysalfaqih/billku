@@ -99,9 +99,7 @@ function UserMenu() {
 // tagihan (No. Tagihan / nama / No. HP / kode pelanggan). Memilih hasil
 // langsung membuka halaman detailnya:
 //   Pelanggan → /customers/:id
-//   Tagihan   → /customers/:id?tab=tagihan&bill=:billId
-//               (belum ada halaman detail tagihan tersendiri, jadi dibuka di tab
-//               Tagihan milik pelanggannya dan tagihan itu otomatis terbuka)
+//   Tagihan   → /billing/:id  (halaman detail tagihan)
 const SEARCH_LIMIT = 5;
 
 const BILL_STATUS: Record<string, { label: string; color: string }> = {
@@ -145,6 +143,7 @@ function GlobalSearch() {
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<SearchItem[]>([]);
   const [customerTotal, setCustomerTotal] = useState(0);
+  const [billTotal, setBillTotal] = useState(0);
   // Kata kunci yang menghasilkan `items` saat ini — dipakai untuk mengenali hasil basi
   const [resultsFor, setResultsFor] = useState('');
   const [loading, setLoading] = useState(false);
@@ -199,12 +198,13 @@ function GlobalSearch() {
       })),
       ...billRows.map((b): SearchItem => ({
         kind: 'bill', key: `b-${b.id}`,
-        to: `/customers/${b.customerId}?tab=tagihan&bill=${b.id}`, data: b,
+        to: `/billing/${b.id}`, data: b,
       })),
     ];
 
     setItems(next);
     setCustomerTotal(cust.status === 'fulfilled' ? cust.value.data.meta?.total ?? customerRows.length : 0);
+    setBillTotal(bill.status === 'fulfilled' ? bill.value.data.meta?.total ?? billRows.length : 0);
     setResultsFor(keyword);
     setSelectedIdx(-1);
     setLoading(false);
@@ -259,10 +259,11 @@ function GlobalSearch() {
     return () => document.removeEventListener('keydown', handler);
   }, [resetSearch]);
 
-  const showAllCustomers = () => {
+  // "Lihat semua": buka halaman daftar dengan kata kunci yang sama
+  const showAll = (path: '/customers' | '/billing') => {
     const keyword = query.trim();
     if (!keyword) return;
-    navigate(`/customers?search=${encodeURIComponent(keyword)}`);
+    navigate(`${path}?search=${encodeURIComponent(keyword)}`);
     resetSearch();
   };
 
@@ -299,6 +300,7 @@ function GlobalSearch() {
   const customerItems = items.filter((i) => i.kind === 'customer');
   const billItems = items.filter((i) => i.kind === 'bill');
   const hasMoreCustomers = customerTotal > customerItems.length;
+  const hasMoreBills = billTotal > billItems.length;
   const dropdownStyle: React.CSSProperties = {
     position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
     zIndex: 200, background: 'var(--surface)', border: '1px solid var(--border)',
@@ -480,10 +482,14 @@ function GlobalSearch() {
             </>
           )}
 
-          {/* Lihat semua (hanya kalau pelanggan yang cocok lebih banyak dari yang ditampilkan) */}
-          {hasMoreCustomers && (
+          {/* Lihat semua (hanya kalau yang cocok lebih banyak dari yang ditampilkan) */}
+          {[
+            { show: hasMoreCustomers, total: customerTotal, noun: 'pelanggan', path: '/customers' as const },
+            { show: hasMoreBills, total: billTotal, noun: 'tagihan', path: '/billing' as const },
+          ].filter((x) => x.show).map((x) => (
             <button
-              onClick={showAllCustomers}
+              key={x.path}
+              onClick={() => showAll(x.path)}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '10px 12px', border: 'none', cursor: 'pointer',
@@ -493,11 +499,11 @@ function GlobalSearch() {
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
             >
               <p style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 500 }}>
-                Lihat semua {customerTotal} pelanggan untuk "<strong style={{ color: 'var(--text-1)' }}>{query.trim()}</strong>"
+                Lihat semua {x.total} {x.noun} untuk "<strong style={{ color: 'var(--text-1)' }}>{query.trim()}</strong>"
               </p>
               <ChevronRight size={13} style={{ color: 'var(--text-3)' }} />
             </button>
-          )}
+          ))}
         </div>
       )}
 
