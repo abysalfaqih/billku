@@ -15,6 +15,10 @@ import { tenants, users, refreshTokens } from '../../database/schema';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 
+// Jeda (ms) saat refresh token yang baru saja dirotasi masih diterima —
+// lihat penjelasan di AuthService.refresh().
+export const REFRESH_REUSE_GRACE_MS = 30_000;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -132,11 +136,23 @@ export class AuthService {
       throw new UnauthorizedException('User tidak aktif');
     }
 
-    // Revoke token lama (rotation — setiap refresh hasilkan token baru)
-    await this.db
-      .update(refreshTokens)
-      .set({ isRevoked: true })
-      .where(eq(refreshTokens.id, stored.id));
+    // Rotasi: setiap refresh menghasilkan token baru, token lama dipensiunkan.
+    //
+    // Token lama TIDAK langsung dicabut — masa berlakunya dipangkas jadi
+    // REFRESH_REUSE_GRACE_MS ke depan. Alasannya: satu halaman memuat beberapa
+    // request sekaligus, dan saat access token habis semuanya bisa memanggil
+    // /auth/refresh dengan refresh token yang sama (atau dua tab sekaligus).
+    // Kalau token langsung dicabut, panggilan kedua ditolak dan pengguna
+    // terlempar ke halaman login padahal sesinya sah. Dengan jeda singkat ini
+    // panggilan kembar tetap berhasil, sedangkan token curian tetap tidak bisa
+    // dipakai setelah jeda habis (logout tetap mencabut penuh lewat isRevoked).
+    const graceUntil = new Date(Date.now() + REFRESH_REUSE_GRACE_MS);
+    if (stored.expiresAt > graceUntil) {
+      await this.db
+        .update(refreshTokens)
+        .set({ expiresAt: graceUntil })
+        .where(eq(refreshTokens.id, stored.id));
+    }
 
     // Generate token baru
     const tokens = await this.generateTokens(

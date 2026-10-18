@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import api from '@/lib/api';
+import api, { AUTH_TIMEOUT_MS } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 
 interface LoginDto {
@@ -17,7 +17,7 @@ export function useLogin() {
 
   return useMutation({
     mutationFn: (dto: LoginDto) =>
-      api.post('/auth/login', dto).then((r) => r.data),
+      api.post('/auth/login', dto, { timeout: AUTH_TIMEOUT_MS }).then((r) => r.data),
 
     onSuccess: (data) => {
       queryClient.clear(); // buang cache sesi/tenant sebelumnya
@@ -27,7 +27,17 @@ export function useLogin() {
     },
 
     onError: (error: any) => {
-      const msg = error?.response?.data?.message;
+      // Tidak ada respons dari server: tombol Masuk tidak boleh berputar tanpa
+      // penjelasan — bedakan "server tidak menjawab" dari "password salah".
+      if (error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT') {
+        toast.error('Server tidak merespons. Periksa koneksi internet, lalu coba lagi.');
+        return;
+      }
+      if (!error?.response) {
+        toast.error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
+        return;
+      }
+      const msg = error.response.data?.message;
       toast.error(Array.isArray(msg) ? msg[0] : (msg ?? 'Login gagal'));
     },
   });
