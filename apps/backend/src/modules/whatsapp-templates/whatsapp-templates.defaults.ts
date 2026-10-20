@@ -95,6 +95,23 @@ export function formatRupiah(amount: string | number): string {
   return Number(amount).toLocaleString('id-ID', { minimumFractionDigits: 0 });
 }
 
+const NAMA_BULAN = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+];
+
+// 'YYYY-MM-DD' → '20 Oktober 2026'. Sengaja memotong string, bukan lewat
+// `new Date()`: kolom `date` dari MySQL sebaiknya tidak ikut digeser zona waktu
+// server, dan hasilnya tidak bergantung pada ICU/locale Node.
+// Input yang bukan 'YYYY-MM-DD' dikembalikan apa adanya.
+export function formatTanggal(isoDate: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
+  if (!m) return isoDate;
+  const bulan = NAMA_BULAN[Number(m[2]) - 1];
+  if (!bulan) return isoDate;
+  return `${Number(m[3])} ${bulan} ${m[1]}`;
+}
+
 // Ganti semua {{key}} pada content dengan value dari data.
 // Placeholder yang tidak dikenal sengaja dibiarkan apa adanya (bukan dikosongkan)
 // supaya salah ketik nama variabel tidak bikin informasi penting hilang diam-diam.

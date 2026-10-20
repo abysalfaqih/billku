@@ -17,6 +17,27 @@ export interface ActiveSession {
   uptime: string;
 }
 
+// Dilempar method "Strict" kalau router tidak bisa dihubungi / login gagal.
+// Dipisah dari error perintah supaya pemanggil (IsolirScheduler) bisa langsung
+// melewati sisa pelanggan di router yang sama alih-alih menunggu timeout
+// berulang-ulang untuk tiap pelanggan.
+export class MikrotikUnreachableError extends Error {
+  constructor(host: string, cause: unknown) {
+    super(`Mikrotik ${host} tidak dapat dihubungi: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'MikrotikUnreachableError';
+  }
+}
+
+// Mikrotik membalas "!empty" / UNKNOWNREPLY untuk "tidak ada data" — itu bukan error.
+function isEmptyReply(err: unknown): boolean {
+  const e = err as { errno?: string; message?: string } | null | undefined;
+  return e?.errno === 'UNKNOWNREPLY' || String(e?.message ?? '').includes('!empty');
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 @Injectable()
 export class MikrotikService {
   private readonly logger = new Logger(MikrotikService.name);
@@ -37,6 +58,31 @@ export class MikrotikService {
       return await callback(api);
     } finally {
       api.close();
+    }
+  }
+
+  // Untuk operasi yang HASILNYA harus dipastikan (isolir): gagal konek dibedakan
+  // dari gagal perintah, dan tidak ada error yang ditelan.
+  private async withStrictConnection<T>(
+    config: MikrotikConnection,
+    callback: (api: RouterOSAPI) => Promise<T>,
+  ): Promise<T> {
+    const api = new RouterOSAPI({
+      host: config.host,
+      port: config.port,
+      user: config.username,
+      password: config.password,
+      timeout: 15,
+    });
+    try {
+      await api.connect();
+    } catch (err) {
+      throw new MikrotikUnreachableError(config.host, err);
+    }
+    try {
+      return await callback(api);
+    } finally {
+      try { api.close(); } catch { /* ignore */ }
     }
   }
 
@@ -241,6 +287,34 @@ export class MikrotikService {
     }
   }
 
+  /**
+   * Seperti kickSession(), tetapi TIDAK menelan error: lempar kalau router tidak
+   * terjangkau atau perintah gagal. Mengembalikan jumlah sesi yang diputus
+   * (0 = pelanggan memang sedang tidak online — itu sukses, bukan gagal).
+   * Dipakai IsolirScheduler yang harus tahu pasti apakah pemutusan berhasil.
+   */
+  async kickSessionStrict(config: MikrotikConnection, username: string): Promise<number> {
+    return this.withStrictConnection(config, async (api) => {
+      let sessions: any[] = [];
+      try {
+        sessions = await api.write('/ppp/active/print', [`?name=${username}`]);
+      } catch (err) {
+        if (!isEmptyReply(err)) throw err;
+      }
+      for (const s of sessions) {
+        try {
+          await api.write('/ppp/active/remove', [`=.id=${s['.id']}`]);
+        } catch (err) {
+          if (!isEmptyReply(err)) throw err;
+        }
+      }
+      if (sessions.length > 0) {
+        this.logger.log(`🔴 Mikrotik: PPPoE session '${username}' diputus (${sessions.length} sesi)`);
+      }
+      return sessions.length;
+    });
+  }
+
   async getActiveSessions(config: MikrotikConnection, username?: string): Promise<ActiveSession[]> {
     return this.withConnection(config, async (api) => {
       const params = username ? [`?name=${username}`] : [];
@@ -385,6 +459,48 @@ export class MikrotikService {
       this.logger.log(`🔴 Mikrotik Hotspot: user '${username}' disabled`);
       return null;
     }, null);
+  }
+
+  /**
+   * Seperti disableHotspotUser(), tetapi gagal = THROW. Kedua langkah (disable
+   * akun, putus sesi aktif) tetap dicoba semua; kalau ada yang gagal, error
+   * dilempar di akhir. User yang tidak ada di router dianggap sukses — tidak
+   * ada akun yang bisa dipakai login.
+   */
+  async disableHotspotUserStrict(config: MikrotikConnection, username: string): Promise<void> {
+    await this.withStrictConnection(config, async (api) => {
+      const failures: string[] = [];
+
+      try {
+        const users = await api.write('/ip/hotspot/user/print', [`?name=${username}`]);
+        if (users.length > 0) {
+          await api.write('/ip/hotspot/user/set', [`=.id=${users[0]['.id']}`, `=disabled=yes`])
+            .catch((err: unknown) => { if (!isEmptyReply(err)) throw err; });
+        } else {
+          this.logger.warn(`Hotspot: user '${username}' tidak ada di router — tidak ada akun yang perlu dinonaktifkan`);
+        }
+      } catch (err) {
+        if (!isEmptyReply(err)) failures.push(`disable akun: ${errorMessage(err)}`);
+      }
+
+      try {
+        const active = await api.write('/ip/hotspot/active/print', [`?user=${username}`]);
+        for (const s of active) {
+          await api.write('/ip/hotspot/active/remove', [`=.id=${s['.id']}`])
+            .catch((err: unknown) => { if (!isEmptyReply(err)) throw err; });
+        }
+        if (active.length > 0) {
+          this.logger.log(`🔴 Hotspot: ${active.length} sesi '${username}' diputus`);
+        }
+      } catch (err) {
+        if (!isEmptyReply(err)) failures.push(`putus sesi: ${errorMessage(err)}`);
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`Hotspot '${username}': ${failures.join('; ')}`);
+      }
+      this.logger.log(`🔴 Mikrotik Hotspot: user '${username}' disabled`);
+    });
   }
 
   async enableHotspotUser(config: MikrotikConnection, username: string): Promise<void> {

@@ -11,7 +11,14 @@ export class SchedulerController {
   @Roles('super_admin')
   @HttpCode(HttpStatus.OK)
   async triggerIsolir() {
-    await this.isolirScheduler.runManually();
-    return { message: 'Auto-isolir berhasil dijalankan secara manual' };
+    const { isolir, reminders } = await this.isolirScheduler.runManually();
+    return {
+      message:
+        isolir.failed.length > 0
+          ? `Auto-isolir dijalankan, tetapi ${isolir.failed.length} pelanggan gagal diputus jaringannya`
+          : 'Auto-isolir berhasil dijalankan secara manual',
+      isolir,
+      reminders,
+    };
   }
 }
