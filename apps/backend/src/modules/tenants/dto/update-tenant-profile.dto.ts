@@ -8,6 +8,7 @@ import {
   IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { NormalizeName } from '../../../common/utils/normalize-name.util';
 
 class BankAccountDto {
   @IsString() bankName: string;
@@ -16,7 +17,7 @@ class BankAccountDto {
 }
 
 export class UpdateTenantProfileDto {
-  @IsString() @IsOptional() name?: string;
+  @NormalizeName() @IsString() @IsOptional() name?: string;
   @IsEmail() @IsOptional() email?: string;
   @IsString() @IsOptional() phone?: string;
   @IsString() @IsOptional() address?: string;

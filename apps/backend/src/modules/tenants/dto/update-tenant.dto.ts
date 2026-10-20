@@ -9,6 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { NormalizeName } from '../../../common/utils/normalize-name.util';
 
 class BankAccountDto {
   @IsString() bankName: string;
@@ -21,7 +22,7 @@ class BankAccountDto {
 // sendiri) — DTO ini menambahkan `slug` karena super_admin boleh mengubah kode
 // login mitra, sesuatu yang sengaja tidak diizinkan lewat endpoint "me/profile".
 export class UpdateTenantDto {
-  @IsString() @IsOptional() name?: string;
+  @NormalizeName() @IsString() @IsOptional() name?: string;
 
   // Slug: huruf kecil, angka, strip — dipakai untuk login
   @IsString()

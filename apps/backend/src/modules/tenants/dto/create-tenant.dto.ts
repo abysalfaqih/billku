@@ -1,7 +1,9 @@
 import { IsString, IsNotEmpty, IsEmail, Matches, IsBoolean, IsOptional, IsNumber} from 'class-validator';
 import { Type } from 'class-transformer';
+import { NormalizeName } from '../../../common/utils/normalize-name.util';
 
 export class CreateTenantDto {
+  @NormalizeName()
   @IsString()
   @IsNotEmpty()
   name: string;
