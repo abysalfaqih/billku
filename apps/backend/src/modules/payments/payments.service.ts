@@ -97,6 +97,13 @@ export class PaymentsService {
     let reactivation: ReactivationResult = { status: 'not_needed' };
     if (customer?.status === 'isolated') {
       reactivation = await this.reactivateIsolatedCustomer(bill.customerId, user.tenantId, customer);
+    } else if (customer?.status === 'active' && customer.connectionType === 'pppoe' && bill.status === 'overdue') {
+      // Isolir otomatis memblokir akun di RADIUS LEBIH DULU, baru memutus sesi di
+      // router dan baru mengubah status jadi 'isolated'. Kalau router tidak
+      // terjangkau saat itu, pelanggan sengaja tetap 'active' (dicoba lagi malam
+      // berikutnya) — padahal blokir RADIUS-nya sudah terpasang. Tanpa langkah ini,
+      // pelanggan yang membayar di sela-sela itu tidak akan pernah dibuka lagi.
+      await this.releaseLingeringRadiusBlock(bill.customerId, user.tenantId, customer);
     }
 
     // Kirim WA notifikasi pembayaran
@@ -126,6 +133,32 @@ export class PaymentsService {
 
     const payment = await this.findOne(Number(result.insertId), user);
     return { ...payment, reactivation };
+  }
+
+  /**
+   * Cabut blokir RADIUS yang mungkin tertinggal pada pelanggan berstatus 'active'
+   * yang baru melunasi tagihan menunggak. Aman dijalankan walau tidak ada blokir
+   * (menghapus baris yang tidak ada = tidak berbuat apa-apa). Best-effort: gagal
+   * hanya dicatat di log, tidak menggagalkan pencatatan pembayaran.
+   */
+  private async releaseLingeringRadiusBlock(
+    customerId: number,
+    tenantId: string,
+    customer: {
+      connectionType: 'pppoe' | 'hotspot';
+      mikrotikConfigId: number | null;
+      usernamePppoe: string | null;
+    },
+  ): Promise<void> {
+    try {
+      await this.customersService.enableNetworkAccess({ ...customer, tenantId });
+    } catch (err) {
+      this.logger.error(
+        `Gagal mencabut blokir RADIUS '${customer.usernamePppoe ?? customerId}' setelah pembayaran: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   /**
