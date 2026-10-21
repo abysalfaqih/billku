@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { IsolirScheduler } from './isolir.scheduler';
+import { CleanupScheduler } from './cleanup.scheduler';
 import { SchedulerController } from './scheduler.controller';
 import { MikrotikModule } from '../mikrotik/mikrotik.module';
 import { RadiusModule } from '../radius/radius.module';
@@ -18,7 +19,7 @@ import { BillingModule } from '../billing/billing.module';
     BillingModule,
   ],
   controllers: [SchedulerController],
-  providers: [IsolirScheduler],
-  exports: [IsolirScheduler],
+  providers: [IsolirScheduler, CleanupScheduler],
+  exports: [IsolirScheduler, CleanupScheduler],
 })
 export class SchedulerModule {}

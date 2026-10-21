@@ -57,6 +57,10 @@ import { RolesGuard } from './common/guards/roles.guard';
         JWT_EXPIRES_IN: Joi.string().default('15m'),
         JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
         FRONTEND_URL: Joi.string().default('http://localhost:3002'),
+        // Pembersihan tabel log mingguan (lihat CleanupScheduler). 0 = tidak dibersihkan.
+        LOG_RETENTION_WHATSAPP_MONTHS: Joi.number().integer().min(0).default(2),
+        LOG_RETENTION_ACTIVITY_MONTHS: Joi.number().integer().min(0).default(2),
+        REFRESH_TOKEN_CLEANUP_DAYS: Joi.number().integer().min(0).default(1),
         CLOUDINARY_CLOUD_NAME: Joi.string().required(),
         CLOUDINARY_API_KEY: Joi.string().required(),
         CLOUDINARY_API_SECRET: Joi.string().required(),
