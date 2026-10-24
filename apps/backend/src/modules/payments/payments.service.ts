@@ -5,18 +5,22 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
-import { eq, and, or, count, desc, like } from 'drizzle-orm';
+import { eq, and, or, ne, count, desc, like } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { payments, bills, customers, users } from '../../database/schema';
 import { CustomersService } from '../customers/customers.service';
+import { BillingService } from '../billing/billing.service';
+import { parseYmd, periodFromStart } from '../billing/billing-period.util';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappTemplatesService } from '../whatsapp-templates/whatsapp-templates.service';
 import { formatRupiah } from '../whatsapp-templates/whatsapp-templates.defaults';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { CreatePaymentDto } from './dto/create-payment.dto';
 import type { QueryPaymentDto } from './dto/query-payment.dto';
+import type { AdvancePreviewDto, CreateAdvancePaymentDto } from './dto/advance-payment.dto';
 
 /**
  * Hasil pengaktifan kembali pelanggan isolir saat tagihan ditandai lunas.
@@ -39,6 +43,7 @@ export class PaymentsService {
     private customersService: CustomersService,
     private whatsappService: WhatsAppService,
     private whatsappTemplatesService: WhatsappTemplatesService,
+    private billingService: BillingService,
   ) {}
 
   async create(dto: CreatePaymentDto, user: AuthUser) {
@@ -133,6 +138,150 @@ export class PaymentsService {
 
     const payment = await this.findOne(Number(result.insertId), user);
     return { ...payment, reactivation };
+  }
+
+  // ─── Bayar di muka ─────────────────────────────────────────────────────────
+
+  /** Pratinjau: periode apa saja yang akan dilunasi dan berapa totalnya. */
+  previewAdvance(query: AdvancePreviewDto, user: AuthUser) {
+    return this.billingService.planAdvancePayment(query.customerId, query.months, user.tenantId);
+  }
+
+  /**
+   * Pelanggan membayar `months` periode ke depan sekaligus. Tiap periode yang belum
+   * punya tagihan dibuatkan tagihannya (langsung berstatus lunas), tiap tagihan
+   * belum-lunas-belum-jatuh-tempo yang sudah ada dilunasi, dan setiap periode
+   * mendapat satu catatan pembayaran. Semua dalam satu transaksi: berhasil semua
+   * atau tidak sama sekali.
+   *
+   * Tagihan otomatis (scheduler) melewati periode yang sudah punya tagihan, jadi
+   * tidak akan terbit dobel; pengingat dan isolir hanya menyentuh tagihan belum
+   * lunas, jadi pelanggan ini tidak diganggu.
+   */
+  async createAdvance(dto: CreateAdvancePaymentDto, user: AuthUser) {
+    const plan = await this.billingService.planAdvancePayment(
+      dto.customerId,
+      dto.months,
+      user.tenantId,
+    );
+
+    // Pratinjau yang dilihat admin harus masih sama dengan rencana sekarang.
+    if (plan.items[0].periodStart !== dto.fromPeriodStart) {
+      throw new ConflictException(
+        'Data pelanggan berubah sejak pratinjau dibuka (mungkin sudah ada pembayaran lain). ' +
+          'Tutup lalu buka lagi dialog ini untuk melihat periode terbaru.',
+      );
+    }
+
+    const notes = dto.notes?.trim() ? `Bayar di muka — ${dto.notes.trim()}` : 'Bayar di muka';
+
+    const recorded = await this.db.transaction(async (tx) => {
+      const out: { billId: number; billNumber: string; periodStart: string; amount: string }[] = [];
+
+      for (const item of plan.items) {
+        let billId = item.billId;
+        let billNumber = item.billNumber;
+
+        if (billId === null) {
+          const start = parseYmd(item.periodStart);
+
+          // Jaga sekali lagi di dalam transaksi: periode ini belum boleh punya tagihan.
+          const [dupe] = await tx
+            .select({ id: bills.id })
+            .from(bills)
+            .where(
+              and(
+                eq(bills.customerId, dto.customerId),
+                eq(bills.tenantId, user.tenantId),
+                eq(bills.periodStart, start),
+                ne(bills.status, 'cancelled'),
+              ),
+            )
+            .limit(1);
+          if (dupe) {
+            throw new ConflictException(`Periode ${item.periodStart} sudah punya tagihan. Muat ulang pratinjau.`);
+          }
+
+          billNumber = await this.billingService.generateBillNumber(user.tenantId, start, tx);
+          const period = periodFromStart(start);
+          const [inserted] = await tx.insert(bills).values({
+            tenantId: user.tenantId,
+            customerId: dto.customerId,
+            billNumber,
+            periodStart: period.periodStart,
+            periodEnd: period.periodEnd,
+            dueDate: period.dueDate,
+            amount: item.amount,
+            taxPercent: item.taxPercent,
+            taxAmount: item.taxAmount,
+            totalAmount: item.totalAmount,
+            packageName: item.packageName,
+            status: 'paid',
+            notes: 'Dibayar di muka',
+          });
+          billId = Number(inserted.insertId);
+        } else {
+          const [updated] = await tx
+            .update(bills)
+            .set({ status: 'paid', updatedAt: new Date() })
+            .where(
+              and(
+                eq(bills.id, billId),
+                eq(bills.tenantId, user.tenantId),
+                eq(bills.status, 'unpaid'),
+              ),
+            );
+          if (!updated || updated.affectedRows !== 1) {
+            throw new ConflictException(
+              `Tagihan ${billNumber} berubah saat diproses. Muat ulang pratinjau lalu coba lagi.`,
+            );
+          }
+        }
+
+        await tx.insert(payments).values({
+          tenantId: user.tenantId,
+          billId,
+          customerId: dto.customerId,
+          amount: item.totalAmount,
+          paymentMethod: dto.paymentMethod,
+          notes,
+          createdBy: user.userId,
+        });
+
+        out.push({ billId, billNumber: billNumber as string, periodStart: item.periodStart, amount: item.totalAmount });
+      }
+
+      return out;
+    });
+
+    // Konfirmasi WA — satu pesan untuk seluruh pembayaran. Gagal mengantre tidak
+    // membatalkan pembayaran yang sudah tersimpan.
+    try {
+      const first = recorded[0].billNumber;
+      const last = recorded[recorded.length - 1].billNumber;
+      await this.whatsappService.queueNotification({
+        tenantId: user.tenantId,
+        phone: plan.customer.phone,
+        message: await this.whatsappTemplatesService.render('payment', user.tenantId, {
+          name: plan.customer.name,
+          billNumber: first === last ? first : `${first} s/d ${last}`,
+          amount: formatRupiah(plan.totalAmount),
+          paidAt: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }),
+        }),
+        trigger: 'payment',
+        customerId: dto.customerId,
+        billId: recorded[0].billId,
+      });
+    } catch (err) {
+      this.logger.error(`WA konfirmasi bayar di muka gagal diantrekan: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return {
+      customerId: dto.customerId,
+      months: dto.months,
+      totalAmount: plan.totalAmount,
+      payments: recorded,
+    };
   }
 
   /**

@@ -104,6 +104,43 @@ export interface CreatePaymentResponse extends Payment {
   reactivation: PaymentReactivation;
 }
 
+// Bayar di muka (GET /payments/advance/preview, POST /payments/advance)
+export interface AdvancePlanItem {
+  /** null = tagihan belum ada dan akan dibuat; angka = tagihan belum lunas yang sudah ada */
+  billId: number | null;
+  billNumber: string | null;
+  periodStart: string; // YYYY-MM-DD
+  periodEnd: string;
+  dueDate: string;
+  amount: string;
+  taxPercent: string | null;
+  taxAmount: string;
+  totalAmount: string;
+  packageName: string;
+}
+
+export interface AdvancePlan {
+  customer: { id: number; name: string; phone: string; billingDate: number };
+  items: AdvancePlanItem[];
+  totalAmount: string;
+}
+
+export interface CreateAdvancePaymentInput {
+  customerId: number;
+  months: number;
+  /** Awal periode pertama yang terlihat di pratinjau — server menolak kalau sudah basi */
+  fromPeriodStart: string;
+  paymentMethod: 'cash' | 'transfer' | 'other';
+  notes?: string;
+}
+
+export interface AdvancePaymentResult {
+  customerId: number;
+  months: number;
+  totalAmount: string;
+  payments: { billId: number; billNumber: string; periodStart: string; amount: string }[];
+}
+
 // Pagination
 export interface PaginatedResponse<T> {
   data: T[];

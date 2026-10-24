@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { QueryPaymentDto } from './dto/query-payment.dto';
+import { AdvancePreviewDto, CreateAdvancePaymentDto } from './dto/advance-payment.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -25,6 +26,20 @@ export class PaymentsController {
   @Roles('super_admin', 'admin', 'staff')
   create(@Body() dto: CreatePaymentDto, @CurrentUser() user: AuthUser) {
     return this.paymentsService.create(dto, user);
+  }
+
+  // Bayar di muka: pelanggan membayar beberapa periode ke depan sebelum tagihannya ada.
+  // Pratinjau (periode + total) dan eksekusi memakai rencana yang sama.
+  @Get('advance/preview')
+  @Roles('super_admin', 'admin', 'staff')
+  previewAdvance(@Query() query: AdvancePreviewDto, @CurrentUser() user: AuthUser) {
+    return this.paymentsService.previewAdvance(query, user);
+  }
+
+  @Post('advance')
+  @Roles('super_admin', 'admin', 'staff')
+  createAdvance(@Body() dto: CreateAdvancePaymentDto, @CurrentUser() user: AuthUser) {
+    return this.paymentsService.createAdvance(dto, user);
   }
 
   @Get()

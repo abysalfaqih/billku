@@ -8,6 +8,7 @@ import type { MySqlColumn, MySqlTable } from 'drizzle-orm/mysql-core';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { activityLogs, refreshTokens, whatsappLogs } from '../../database/schema';
+import { readNonNegativeInt } from '../../common/utils/config-int.util';
 
 // Tabel log yang tumbuh terus dibersihkan seminggu sekali:
 //   - whatsapp_logs : simpan LOG_RETENTION_WHATSAPP_MONTHS bulan terakhir (bawaan 2)
@@ -161,17 +162,7 @@ export class CleanupScheduler {
   // Angka bulat >= 0 dari pengaturan; nilai aneh jatuh ke bawaan (bukan 0,
   // supaya salah ketik tidak mematikan pembersihan atau menghapus terlalu banyak).
   private readCount(key: string, fallback: number): number {
-    const raw = this.config.get<string | number>(key);
-    if (raw === undefined || raw === null) return fallback;
-    const text = String(raw).trim();
-    if (text === '') return fallback;
-    // Hanya digit: ' ', '1.5', '-1', '0x10', '1e3' semuanya ditolak. (Number(' ')
-    // bernilai 0 — tanpa pemeriksaan ini, nilai kosong akan mematikan pembersihan.)
-    if (!/^\d{1,6}$/.test(text)) {
-      this.logger.warn(`⚠️ ${key}='${text}' tidak valid — dipakai nilai bawaan ${fallback}`);
-      return fallback;
-    }
-    return Number(text);
+    return readNonNegativeInt(this.config, key, fallback, this.logger);
   }
 
   // Angka sudah divalidasi bilangan bulat >= 0 di atas, jadi aman ditulis

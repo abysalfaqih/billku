@@ -1,13 +1,40 @@
 import {
   Injectable, Inject, NotFoundException, BadRequestException, ConflictException,
 } from '@nestjs/common';
-import { eq, and, or, count, desc, like, sql } from 'drizzle-orm';
+import { eq, and, or, count, desc, asc, ne, like, sql } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { bills, customers, packages, tenants, payments, users } from '../../database/schema';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { QueryBillingDto } from './dto/query-billing.dto';
 import { buildInvoicePdf } from './invoice-pdf.util';
+import {
+  firstBillingDateOnOrAfter, parseYmd, periodFromStart, startOfDay, toYmd,
+} from './billing-period.util';
+import type { BillPeriod } from './billing-period.util';
+
+// Yang dibutuhkan untuk membuat nomor tagihan: bisa koneksi biasa ataupun transaksi.
+type SelectCapable = Pick<DrizzleClient, 'select'>;
+
+export interface AdvancePlanItem {
+  /** null = tagihan belum ada dan akan dibuat; angka = tagihan belum lunas yang sudah ada */
+  billId: number | null;
+  billNumber: string | null;
+  periodStart: string; // YYYY-MM-DD
+  periodEnd: string;
+  dueDate: string;
+  amount: string;
+  taxPercent: string | null;
+  taxAmount: string;
+  totalAmount: string;
+  packageName: string;
+}
+
+export interface AdvancePlan {
+  customer: { id: number; name: string; phone: string; billingDate: number };
+  items: AdvancePlanItem[];
+  totalAmount: string;
+}
 
 @Injectable()
 export class BillingService {
@@ -17,7 +44,12 @@ export class BillingService {
     return this.generateForCustomer(customerId, user.tenantId);
   }
 
-  async generateForCustomer(customerId: number, tenantId: string) {
+  /**
+   * @param periodStart awal periode yang ditagih. Kosong = periode bulan berjalan
+   *   (perilaku tombol "Generate Tagihan"); scheduler mengisinya dengan periode
+   *   yang akan datang supaya tagihan terbit lebih awal.
+   */
+  async generateForCustomer(customerId: number, tenantId: string, periodStart?: Date) {
     const [customer] = await this.db
       .select()
       .from(customers)
@@ -31,32 +63,25 @@ export class BillingService {
     const [pkg] = await this.db.select().from(packages).where(eq(packages.id, customer.packageId)).limit(1);
     if (!pkg) throw new NotFoundException('Paket pelanggan tidak ditemukan');
 
-    const { periodStart, periodEnd, dueDate } = this.calculatePeriod(customer.billingDate);
+    const period = this.calculatePeriod(customer.billingDate, periodStart);
 
     const [existing] = await this.db
       .select({ id: bills.id, status: bills.status })
       .from(bills)
-      .where(and(eq(bills.customerId, customerId), eq(bills.tenantId, tenantId), eq(bills.periodStart, periodStart)))
+      .where(and(eq(bills.customerId, customerId), eq(bills.tenantId, tenantId), eq(bills.periodStart, period.periodStart)))
       .limit(1);
 
     if (existing && existing.status !== 'cancelled') {
       throw new ConflictException('Tagihan untuk periode ini sudah ada');
     }
 
-    const billNumber = await this.generateBillNumber(tenantId, periodStart);
-
-    // ── Hitung PPN ────────────────────────────────────────────────
-    const baseAmount = Number(pkg.price);
-    const taxPercent = customer.taxEnabled ? Number(customer.taxPercent ?? 0) : 0;
-    const taxAmount = taxPercent > 0 ? Number(((baseAmount * taxPercent) / 100).toFixed(2)) : 0;
-    const totalAmount = baseAmount + taxAmount;
+    const billNumber = await this.generateBillNumber(tenantId, period.periodStart);
+    const amounts = this.computeBillAmounts(customer, pkg);
 
     const [result] = await this.db.insert(bills).values({
-      tenantId, customerId, billNumber, periodStart, periodEnd, dueDate,
-      amount: String(baseAmount),
-      taxPercent: customer.taxEnabled ? String(taxPercent) : null,
-      taxAmount: String(taxAmount),
-      totalAmount: String(totalAmount),
+      tenantId, customerId, billNumber,
+      periodStart: period.periodStart, periodEnd: period.periodEnd, dueDate: period.dueDate,
+      ...amounts,
       packageName: pkg.name,
     });
 
@@ -313,25 +338,171 @@ export class BillingService {
     return [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
   }
 
-  // ─── Private Helpers ─────────────────────────────────────────────────
+  /**
+   * Rencana "bayar di muka": periode-periode berikutnya yang akan dilunasi
+   * `months` bulan ke depan. Dipakai untuk pratinjau DAN untuk eksekusi, supaya
+   * yang dilihat admin persis yang dilakukan sistem.
+   *
+   * Urutannya: tagihan yang SUDAH ada tapi belum lunas (belum jatuh tempo) dilunasi
+   * lebih dulu, sisanya dibuatkan tagihan baru untuk periode berikutnya (bulan demi
+   * bulan, tidak pernah mundur ke periode yang sudah lewat).
+   *
+   * Ditolak (BadRequest, pesannya untuk admin) kalau pelanggan tidak aktif, belum
+   * pernah punya tagihan, atau masih punya tagihan menunggak — itu urusan
+   * "Tandai Lunas", bukan bayar di muka.
+   */
+  async planAdvancePayment(
+    customerId: number,
+    months: number,
+    tenantId: string,
+    today: Date = new Date(),
+  ): Promise<AdvancePlan> {
+    if (!Number.isInteger(months) || months < 1 || months > 12) {
+      throw new BadRequestException('Jumlah bulan harus antara 1 dan 12');
+    }
 
-  private calculatePeriod(billingDate: number) {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth();
+    const [customer] = await this.db
+      .select()
+      .from(customers)
+      .where(and(eq(customers.id, customerId), eq(customers.tenantId, tenantId)))
+      .limit(1);
+    if (!customer) throw new NotFoundException('Pelanggan tidak ditemukan');
+    if (customer.status !== 'active') {
+      throw new BadRequestException(
+        'Bayar di muka hanya untuk pelanggan aktif. Pelanggan isolir melunasi tagihan menunggaknya lebih dulu lewat "Tandai Lunas".',
+      );
+    }
+    if (!customer.packageId) throw new BadRequestException('Pelanggan belum punya paket');
+
+    const [pkg] = await this.db.select().from(packages).where(eq(packages.id, customer.packageId)).limit(1);
+    if (!pkg) throw new NotFoundException('Paket pelanggan tidak ditemukan');
+
+    const ymd = (col: typeof bills.periodStart | typeof bills.periodEnd | typeof bills.dueDate) =>
+      sql<string>`DATE_FORMAT(${col}, '%Y-%m-%d')`;
+    const existing = await this.db
+      .select({
+        id: bills.id,
+        billNumber: bills.billNumber,
+        status: bills.status,
+        periodStart: ymd(bills.periodStart),
+        periodEnd: ymd(bills.periodEnd),
+        dueDate: ymd(bills.dueDate),
+        amount: bills.amount,
+        taxPercent: bills.taxPercent,
+        taxAmount: bills.taxAmount,
+        totalAmount: bills.totalAmount,
+        packageName: bills.packageName,
+      })
+      .from(bills)
+      .where(and(
+        eq(bills.customerId, customerId),
+        eq(bills.tenantId, tenantId),
+        ne(bills.status, 'cancelled'),
+      ))
+      .orderBy(asc(bills.periodStart), asc(bills.id));
+
+    if (existing.length === 0) {
+      throw new BadRequestException(
+        'Pelanggan ini belum punya tagihan sama sekali. Buat tagihan pertamanya lewat "Generate Tagihan" dulu.',
+      );
+    }
+
+    const todayYmd = toYmd(today);
+    const overdue = existing.find(
+      (b) => b.status === 'overdue' || (b.status === 'unpaid' && b.dueDate < todayYmd),
+    );
+    if (overdue) {
+      throw new BadRequestException(
+        `Pelanggan masih punya tagihan menunggak (${overdue.billNumber}). Lunasi dulu lewat "Tandai Lunas".`,
+      );
+    }
+
+    // Tagihan yang sudah ada, belum lunas, belum jatuh tempo → dilunasi dulu.
+    const items: AdvancePlanItem[] = existing
+      .filter((b) => b.status === 'unpaid')
+      .slice(0, months)
+      .map((b) => ({
+        billId: b.id,
+        billNumber: b.billNumber,
+        periodStart: b.periodStart,
+        periodEnd: b.periodEnd,
+        dueDate: b.dueDate,
+        amount: b.amount,
+        taxPercent: b.taxPercent,
+        taxAmount: b.taxAmount,
+        totalAmount: b.totalAmount,
+        packageName: b.packageName,
+      }));
+
+    const remaining = months - items.length;
+    if (remaining > 0) {
+      // Periode baru dimulai setelah tagihan terakhir, tetapi tidak pernah di masa lalu
+      // (pelanggan yang lama terisolir tidak ditagih untuk bulan-bulan yang sudah lewat).
+      const lastStart = parseYmd(existing[existing.length - 1].periodStart);
+      const afterLast = new Date(lastStart.getFullYear(), lastStart.getMonth() + 1, customer.billingDate);
+      const fromToday = firstBillingDateOnOrAfter(customer.billingDate, startOfDay(today));
+      const first = afterLast >= fromToday ? afterLast : fromToday;
+      const amounts = this.computeBillAmounts(customer, pkg);
+
+      for (let i = 0; i < remaining; i++) {
+        const period = periodFromStart(
+          new Date(first.getFullYear(), first.getMonth() + i, customer.billingDate),
+        );
+        items.push({
+          billId: null,
+          billNumber: null,
+          periodStart: toYmd(period.periodStart),
+          periodEnd: toYmd(period.periodEnd),
+          dueDate: toYmd(period.dueDate),
+          ...amounts,
+          packageName: pkg.name,
+        });
+      }
+    }
+
+    const totalAmount = items.reduce((sum, it) => sum + Number(it.totalAmount), 0).toFixed(2);
     return {
-      periodStart: new Date(year, month, billingDate),
-      periodEnd: new Date(year, month + 1, billingDate - 1),
-      dueDate: new Date(year, month, billingDate),
+      customer: { id: customer.id, name: customer.name, phone: customer.phone, billingDate: customer.billingDate },
+      items,
+      totalAmount,
     };
   }
 
-  private async generateBillNumber(tenantId: string, period: Date): Promise<string> {
+  // ─── Private Helpers ─────────────────────────────────────────────────
+
+  private calculatePeriod(billingDate: number, periodStart?: Date): BillPeriod {
+    if (periodStart) return periodFromStart(periodStart);
+    const today = new Date();
+    return periodFromStart(new Date(today.getFullYear(), today.getMonth(), billingDate));
+  }
+
+  /** Harga paket + PPN pelanggan. Satu sumber untuk tagihan otomatis maupun bayar di muka. */
+  computeBillAmounts(
+    customer: { taxEnabled: boolean; taxPercent: string | null },
+    pkg: { price: string },
+  ) {
+    const baseAmount = Number(pkg.price);
+    const taxPercent = customer.taxEnabled ? Number(customer.taxPercent ?? 0) : 0;
+    const taxAmount = taxPercent > 0 ? Number(((baseAmount * taxPercent) / 100).toFixed(2)) : 0;
+    const totalAmount = baseAmount + taxAmount;
+    return {
+      amount: String(baseAmount),
+      taxPercent: customer.taxEnabled ? String(taxPercent) : null,
+      taxAmount: String(taxAmount),
+      totalAmount: String(totalAmount),
+    };
+  }
+
+  async generateBillNumber(
+    tenantId: string,
+    period: Date,
+    db: SelectCapable = this.db,
+  ): Promise<string> {
     const year = period.getFullYear();
     const month = String(period.getMonth() + 1).padStart(2, '0');
     const prefix = `INV-${year}${month}-`;
 
-    const [lastBill] = await this.db
+    const [lastBill] = await db
       .select({ billNumber: bills.billNumber })
       .from(bills)
       .where(and(eq(bills.tenantId, tenantId), like(bills.billNumber, `${prefix}%`)))

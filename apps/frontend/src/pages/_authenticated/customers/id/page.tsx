@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Wifi, FileText, CreditCard, CheckCircle2, Clock,
   AlertTriangle, XCircle, Edit2, Zap, Phone, MapPin, Calendar,
-  Hash, User, Network, ChevronDown, ChevronUp, Key, IdCard,
+  Hash, User, Network, ChevronDown, ChevronUp, Key, IdCard, CalendarCheck,
 } from 'lucide-react';
 import { useResetPassword } from '@/hooks/useMonitoring';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { CustomerForm } from '../components/customer-form';
+import { AdvancePayDialog } from '../components/advance-pay-dialog';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -152,6 +153,7 @@ export default function CustomerDetailPage() {
   const qc = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [advanceOpen, setAdvanceOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   // ?tab=tagihan&bill=<id> dikirim oleh pencarian topbar saat hasilnya sebuah tagihan
   const [searchParams] = useSearchParams();
@@ -242,6 +244,12 @@ export default function CustomerDetailPage() {
               <Button variant="outline" size="sm" icon={<Edit2 size={13} />} onClick={() => setEditOpen(true)}>
                 Edit
               </Button>
+              {/* Bayar di muka hanya untuk pelanggan aktif; server menolak kalau ada tunggakan */}
+              {customer.status === 'active' && (
+                <Button variant="outline" size="sm" icon={<CalendarCheck size={13} />} onClick={() => setAdvanceOpen(true)}>
+                  Bayar di Muka
+                </Button>
+              )}
               <Button size="sm" icon={<Zap size={13} />} onClick={() => setGenerateOpen(true)}>
                 Generate Tagihan
               </Button>
@@ -484,6 +492,13 @@ export default function CustomerDetailPage() {
         open={editOpen}
         onClose={() => { setEditOpen(false); qc.invalidateQueries({ queryKey: ['customer-detail', params.id] }); }}
         customer={data.customer}
+      />
+
+      <AdvancePayDialog
+        open={advanceOpen}
+        onClose={() => setAdvanceOpen(false)}
+        customerId={customer.id}
+        customerName={customer.name}
       />
 
       <Dialog

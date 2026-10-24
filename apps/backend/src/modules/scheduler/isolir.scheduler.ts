@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, Logger, Inject } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { bills, customers, packages, ipPools, mikrotikConfigs } from '../../database/schema';
@@ -12,6 +13,13 @@ import { TenantSubscriptionsService } from '../tenant-subscriptions/tenant-subsc
 import { BillingService } from '../billing/billing.service';
 import { WhatsappTemplatesService } from '../whatsapp-templates/whatsapp-templates.service';
 import { formatRupiah, formatTanggal } from '../whatsapp-templates/whatsapp-templates.defaults';
+import { readNonNegativeInt } from '../../common/utils/config-int.util';
+import {
+  DEFAULT_BILL_LEAD_DAYS,
+  MAX_BILL_LEAD_DAYS,
+  periodStartInWindow,
+  toYmd,
+} from '../billing/billing-period.util';
 
 // Pengingat dikirim berapa hari sebelum jatuh tempo. Teks template bawaan
 // ("dalam 3 hari") dan label "Pengingat Tagihan (H-3)" mengikuti angka ini.
@@ -63,6 +71,7 @@ export class IsolirScheduler {
     private tenantSubscriptionsService: TenantSubscriptionsService,
     private billingService: BillingService,
     private whatsappTemplatesService: WhatsappTemplatesService,
+    private config: ConfigService,
   ) {}
 
   @Cron('5 0 * * *')
@@ -114,30 +123,82 @@ export class IsolirScheduler {
 
   // ─── Generate tagihan otomatis ─────────────────────────────────────────
 
+  /**
+   * Tagihan terbit BILL_LEAD_DAYS hari (bawaan 7) sebelum tanggal tagihan; jatuh
+   * tempo tetap di tanggal tagihan. Dengan begitu pelanggan yang membayar lebih
+   * awal punya tagihan untuk dilunasi, dan pengingat H-3 punya tagihan untuk
+   * diingatkan.
+   *
+   * Memakai JENDELA, bukan "tepat hari H": tiap malam diterbitkan semua tagihan
+   * yang periodenya mulai dalam [hari ini, hari ini + N] dan belum ada. Server
+   * yang mati pada malam tertentu tidak membuat tagihan hilang — terbit di malam
+   * berikutnya. Periode yang sudah ada (termasuk yang dibayar di muka) dilewati
+   * diam-diam lewat satu query, bukan lewat error per pelanggan.
+   * BILL_LEAD_DAYS=0 = perilaku lama (terbit tepat di tanggal tagihan).
+   */
   private async processAutoGenerateBills() {
-    const today = new Date().getDate();
+    const leadDays = readNonNegativeInt(
+      this.config,
+      'BILL_LEAD_DAYS',
+      DEFAULT_BILL_LEAD_DAYS,
+      this.logger,
+      MAX_BILL_LEAD_DAYS,
+    );
+    const today = new Date();
 
-    const dueCustomers = await this.db
-      .select({ id: customers.id, tenantId: customers.tenantId, name: customers.name })
+    const activeCustomers = await this.db
+      .select({
+        id: customers.id,
+        tenantId: customers.tenantId,
+        name: customers.name,
+        billingDate: customers.billingDate,
+      })
       .from(customers)
-      .where(and(eq(customers.status, 'active'), eq(customers.billingDate, today)));
+      .where(eq(customers.status, 'active'));
 
-    if (dueCustomers.length === 0) {
+    const inWindow: { id: number; tenantId: string; name: string; start: Date }[] = [];
+    for (const c of activeCustomers) {
+      const start = periodStartInWindow(c.billingDate, today, leadDays);
+      if (start) inWindow.push({ id: c.id, tenantId: c.tenantId, name: c.name, start });
+    }
+
+    if (inWindow.length === 0) {
       this.logger.log('✅ Tidak ada pelanggan yang perlu di-generate tagihan hari ini');
       return;
     }
 
+    const starts = inWindow.map((c) => toYmd(c.start)).sort();
+    const haveRows = await this.db
+      .select({
+        customerId: bills.customerId,
+        periodStart: sql<string>`DATE_FORMAT(${bills.periodStart}, '%Y-%m-%d')`,
+      })
+      .from(bills)
+      .where(
+        and(
+          ne(bills.status, 'cancelled'),
+          sql`${bills.periodStart} BETWEEN ${starts[0]} AND ${starts[starts.length - 1]}`,
+        ),
+      );
+    const have = new Set(haveRows.map((r) => `${r.customerId}|${r.periodStart}`));
+    const todo = inWindow.filter((c) => !have.has(`${c.id}|${toYmd(c.start)}`));
+
+    if (todo.length === 0) {
+      this.logger.log(`✅ Semua tagihan untuk ${inWindow.length} pelanggan dalam jendela ${leadDays} hari sudah terbit`);
+      return;
+    }
+
     let success = 0;
-    for (const c of dueCustomers) {
+    for (const c of todo) {
       try {
-        await this.billingService.generateForCustomer(c.id, c.tenantId);
+        await this.billingService.generateForCustomer(c.id, c.tenantId, c.start);
         success++;
       } catch (err) {
         this.logger.warn(`⚠️ Skip generate '${c.name}': ${err}`);
       }
     }
 
-    this.logger.log(`🧾 Auto-generate: ${success}/${dueCustomers.length} tagihan dibuat`);
+    this.logger.log(`🧾 Auto-generate: ${success}/${todo.length} tagihan dibuat (terbit ${leadDays} hari sebelum tanggal tagihan)`);
   }
 
   // ─── Isolir otomatis ───────────────────────────────────────────────────

@@ -61,6 +61,8 @@ import { RolesGuard } from './common/guards/roles.guard';
         LOG_RETENTION_WHATSAPP_MONTHS: Joi.number().integer().min(0).default(2),
         LOG_RETENTION_ACTIVITY_MONTHS: Joi.number().integer().min(0).default(2),
         REFRESH_TOKEN_CLEANUP_DAYS: Joi.number().integer().min(0).default(1),
+        // Tagihan diterbitkan berapa hari sebelum tanggal tagihan (0 = tepat di tanggal tagihan)
+        BILL_LEAD_DAYS: Joi.number().integer().min(0).max(27).default(7),
         CLOUDINARY_CLOUD_NAME: Joi.string().required(),
         CLOUDINARY_API_KEY: Joi.string().required(),
         CLOUDINARY_API_SECRET: Joi.string().required(),
