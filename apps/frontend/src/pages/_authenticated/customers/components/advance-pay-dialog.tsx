@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CalendarCheck, AlertCircle } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -53,15 +53,23 @@ export function AdvancePayDialog({ open, onClose, customerId, customerName }: Ad
   const busy = preview.isFetching || pay.isPending;
   const canSubmit = !!plan && !busy && !preview.isError;
 
+  // Penjaga klik beruntun: status "sedang mengirim" dari react-query baru tiba sesaat
+  // setelah klik pertama, jadi klik kedua yang sangat cepat bisa lolos dari `canSubmit`.
+  const submitting = useRef(false);
+
   const handlePay = () => {
-    if (!plan || !canSubmit) return;
-    pay.mutate({
-      customerId,
-      months: monthsNum,
-      fromPeriodStart: plan.items[0].periodStart,
-      paymentMethod: method as 'cash' | 'transfer' | 'other',
-      notes: notes.trim() || undefined,
-    });
+    if (!plan || !canSubmit || submitting.current) return;
+    submitting.current = true;
+    pay.mutate(
+      {
+        customerId,
+        months: monthsNum,
+        fromPeriodStart: plan.items[0].periodStart,
+        paymentMethod: method as 'cash' | 'transfer' | 'other',
+        notes: notes.trim() || undefined,
+      },
+      { onSettled: () => { submitting.current = false; } },
+    );
   };
 
   return (

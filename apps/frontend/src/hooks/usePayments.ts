@@ -49,6 +49,26 @@ export function useCreatePayment(onSuccess?: () => void) {
           'Status pelanggan tetap Isolir — coba lagi lewat Edit Pelanggan → Status → Aktif.',
           { icon: '⚠️', duration: 10000 },
         );
+      } else if (reactivation?.status === 'blocked') {
+        // Pembayaran tercatat, tapi masih ada tunggakan lain → layanan belum dibuka.
+        // Tanpa pemberitahuan ini admin mengira pelanggan sudah aktif.
+        const rupiah = (v: string) => `Rp ${Number(v).toLocaleString('id-ID')}`;
+        // 'YYYY-MM-DD' → '15 Sep 2026' tanpa melewati Date (tidak bergeser zona waktu)
+        const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+        const tanggal = (ymd: string) => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd);
+          return m ? `${Number(m[3])} ${BULAN[Number(m[2]) - 1] ?? m[2]} ${m[1]}` : ymd;
+        };
+        const daftar = reactivation.remaining
+          .map((r) => `${r.billNumber} (${rupiah(r.totalAmount)}, jatuh tempo ${tanggal(r.dueDate)})`)
+          .join('; ');
+        toast.success('Pembayaran berhasil dicatat');
+        toast(
+          `Pelanggan masih punya tunggakan: ${daftar}. ` +
+          'Layanan baru aktif kembali setelah semuanya lunas — bayar tagihan tersebut, ' +
+          'atau batalkan bila memang tidak perlu ditagih.',
+          { icon: '⚠️', duration: 12000 },
+        );
       } else if (reactivation?.status === 'reactivated') {
         toast.success('Pembayaran dicatat — pelanggan diaktifkan kembali');
       } else {

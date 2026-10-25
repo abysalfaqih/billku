@@ -98,7 +98,10 @@ export interface Payment {
 export type PaymentReactivation =
   | { status: 'not_needed' }
   | { status: 'reactivated' }
-  | { status: 'failed'; message: string };
+  | { status: 'failed'; message: string }
+  // Pembayaran tercatat, tapi pelanggan masih punya tagihan LAIN yang lewat jatuh tempo:
+  // layanan baru dibuka setelah semuanya lunas (atau dibatalkan oleh admin).
+  | { status: 'blocked'; remaining: { billNumber: string; totalAmount: string; dueDate: string }[] };
 
 export interface CreatePaymentResponse extends Payment {
   reactivation: PaymentReactivation;

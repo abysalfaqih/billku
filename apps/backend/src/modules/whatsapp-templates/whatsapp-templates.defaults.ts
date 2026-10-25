@@ -40,6 +40,7 @@ export const TEMPLATE_VARIABLES: Record<
     { key: 'billNumber', description: 'Nomor tagihan' },
     { key: 'amount', description: 'Jumlah tagihan (sudah diformat Rupiah)' },
     { key: 'dueDate', description: 'Tanggal jatuh tempo' },
+    { key: 'sisaWaktu', description: 'Sisa waktu sampai jatuh tempo (otomatis: "3 hari lagi", "besok", atau "hari ini")' },
   ],
   isolir: [
     { key: 'name', description: 'Nama pelanggan' },
@@ -51,6 +52,7 @@ export const TEMPLATE_VARIABLES: Record<
     { key: 'billNumber', description: 'Nomor tagihan' },
     { key: 'amount', description: 'Jumlah tagihan (sudah diformat Rupiah)' },
     { key: 'paidAt', description: 'Tanggal pembayaran' },
+    { key: 'keterangan', description: 'Keterangan status layanan (otomatis: diaktifkan kembali / masih ada tagihan lain / terima kasih)' },
   ],
 };
 
@@ -67,7 +69,7 @@ export const DEFAULT_TEMPLATES: Record<WhatsappTemplateType, string> = {
   reminder:
     `⏰ *Pengingat Tagihan*\n\n` +
     `Halo *{{name}}*,\n\n` +
-    `Tagihan internet Anda akan jatuh tempo dalam *3 hari*.\n\n` +
+    `Tagihan internet Anda akan jatuh tempo *{{sisaWaktu}}*.\n\n` +
     `📋 No. Tagihan: *{{billNumber}}*\n` +
     `💰 Jumlah: *Rp {{amount}}*\n` +
     `📅 Jatuh Tempo: *{{dueDate}}*\n\n` +
@@ -88,8 +90,44 @@ export const DEFAULT_TEMPLATES: Record<WhatsappTemplateType, string> = {
     `📋 No. Tagihan: *{{billNumber}}*\n` +
     `💰 Jumlah: *Rp {{amount}}*\n` +
     `📅 Tanggal Bayar: *{{paidAt}}*\n\n` +
-    `Layanan internet Anda telah diaktifkan kembali. Terima kasih! 🙏`,
+    `{{keterangan}}`,
 };
+
+// Sisa waktu pengingat dalam bahasa pelanggan: 0 → "hari ini", 1 → "besok", n → "n hari lagi".
+export function sisaWaktuText(daysLeft: number): string {
+  if (daysLeft <= 0) return 'hari ini';
+  if (daysLeft === 1) return 'besok';
+  return `${daysLeft} hari lagi`;
+}
+
+// Keterangan di bawah konfirmasi pembayaran. Dulu kalimat "layanan telah diaktifkan
+// kembali" tertulis tetap, sehingga ikut terkirim ke pelanggan yang tidak pernah
+// diisolir dan ke pelanggan yang masih punya tagihan lain.
+export type PaymentNoteKind =
+  | { kind: 'reactivated' }
+  | { kind: 'thanks' }
+  | { kind: 'pending-activation' }
+  // isolated: pelanggan sedang diisolir (layanan baru aktif setelah SEMUA lunas);
+  // false: layanan masih berjalan, tinggal mengingatkan agar sisanya dilunasi.
+  | { kind: 'arrears'; billNumbers: string[]; isolated: boolean };
+
+export function paymentKeterangan(note: PaymentNoteKind): string {
+  switch (note.kind) {
+    case 'reactivated':
+      return 'Layanan internet Anda telah diaktifkan kembali. Terima kasih! 🙏';
+    case 'pending-activation':
+      return 'Pembayaran Anda sudah kami terima dan layanan sedang kami aktifkan kembali. Terima kasih! 🙏';
+    case 'arrears':
+      return (
+        `Masih ada tagihan lain yang belum dibayar: ${note.billNumbers.join(', ')}. ` +
+        (note.isolated
+          ? 'Layanan akan diaktifkan kembali setelah semua tagihan tersebut lunas.'
+          : 'Mohon segera dilunasi agar layanan Anda tidak terputus.')
+      );
+    default:
+      return 'Terima kasih atas pembayaran Anda! 🙏';
+  }
+}
 
 export function formatRupiah(amount: string | number): string {
   return Number(amount).toLocaleString('id-ID', { minimumFractionDigits: 0 });

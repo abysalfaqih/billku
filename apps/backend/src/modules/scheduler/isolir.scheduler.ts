@@ -1,10 +1,11 @@
 import { ConflictException, Injectable, Logger, Inject } from '@nestjs/common';
+import type { OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { bills, customers, packages, ipPools, mikrotikConfigs } from '../../database/schema';
+import { bills, customers, packages, ipPools, mikrotikConfigs, whatsappLogs } from '../../database/schema';
 import { RadiusService } from '../radius/radius.service';
 import { MikrotikService, MikrotikUnreachableError } from '../mikrotik/mikrotik.service';
 import type { MikrotikConnection } from '../mikrotik/mikrotik.service';
@@ -12,11 +13,14 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { TenantSubscriptionsService } from '../tenant-subscriptions/tenant-subscriptions.service';
 import { BillingService } from '../billing/billing.service';
 import { WhatsappTemplatesService } from '../whatsapp-templates/whatsapp-templates.service';
-import { formatRupiah, formatTanggal } from '../whatsapp-templates/whatsapp-templates.defaults';
+import { formatRupiah, formatTanggal, sisaWaktuText } from '../whatsapp-templates/whatsapp-templates.defaults';
 import { readNonNegativeInt } from '../../common/utils/config-int.util';
+import { APP_TIMEZONE, todayInAppTz, ymdInAppTz } from '../../common/utils/app-time.util';
 import {
   DEFAULT_BILL_LEAD_DAYS,
   MAX_BILL_LEAD_DAYS,
+  addDays,
+  parseYmd,
   periodStartInWindow,
   toYmd,
 } from '../billing/billing-period.util';
@@ -24,6 +28,12 @@ import {
 // Pengingat dikirim berapa hari sebelum jatuh tempo. Teks template bawaan
 // ("dalam 3 hari") dan label "Pengingat Tagihan (H-3)" mengikuti angka ini.
 export const REMINDER_DAYS_BEFORE_DUE = 3;
+
+// Proses harian yang masih "berjalan" lebih lama dari ini dianggap macet (mis.
+// menunggu koneksi yang tak pernah putus) dan tidak lagi menghalangi proses
+// berikutnya. Semua langkah bersifat idempotent, jadi dua proses yang kebetulan
+// tumpang-tindih tidak merusak data.
+export const STALE_RUN_MS = 2 * 60 * 60 * 1000;
 
 export interface IsolirFailure {
   customerId: number;
@@ -59,9 +69,10 @@ interface IsolirCandidate {
 }
 
 @Injectable()
-export class IsolirScheduler {
+export class IsolirScheduler implements OnApplicationBootstrap {
   private readonly logger = new Logger(IsolirScheduler.name);
   private running = false;
+  private runningSince = 0;
 
   constructor(
     @Inject(DRIZZLE) private db: DrizzleClient,
@@ -74,23 +85,81 @@ export class IsolirScheduler {
     private config: ConfigService,
   ) {}
 
-  @Cron('5 0 * * *')
+  /**
+   * Catat selisih zona waktu saat aplikasi menyala. Tanggal untuk tagihan, isolir
+   * dan pengingat dihitung aplikasi (WIB) lalu dikirim ke SQL, jadi zona waktu
+   * database tidak memengaruhi jadwal; baris ini hanya untuk diagnosa — halaman
+   * yang masih memakai CURDATE() database (dashboard, laporan) bisa bergeser sehari
+   * pada jam-jam tertentu kalau zona waktunya berbeda.
+   */
+  async onApplicationBootstrap() {
+    try {
+      const [rows] = (await this.db.execute(
+        sql`SELECT TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), NOW()) AS offsetMin, @@session.time_zone AS tz`,
+      )) as unknown as [{ offsetMin: number | string; tz: string }[]];
+      const dbOffsetMin = Number(rows?.[0]?.offsetMin);
+      const appOffsetMin = 7 * 60; // WIB
+      if (Number.isFinite(dbOffsetMin) && dbOffsetMin !== appOffsetMin) {
+        this.logger.warn(
+          `🕐 Zona waktu database (UTC${dbOffsetMin >= 0 ? '+' : ''}${dbOffsetMin / 60}, ${rows?.[0]?.tz}) berbeda dari ${APP_TIMEZONE}. ` +
+            'Jadwal tagihan/isolir/pengingat aman (tanggal dihitung aplikasi), tetapi dashboard & laporan yang memakai tanggal database bisa bergeser sehari di jam tertentu.',
+        );
+      } else {
+        this.logger.log(`🕐 Zona waktu: aplikasi & database sama (${APP_TIMEZONE}); hari ini ${ymdInAppTz()}`);
+      }
+    } catch (err) {
+      this.logger.warn(`Tidak bisa memeriksa zona waktu database: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Proses utama: tiap hari 00:05 WIB.
+  @Cron('5 0 * * *', { name: 'daily-check', timeZone: APP_TIMEZONE })
   async handleDailyCheck() {
-    if (this.running) {
-      this.logger.warn('⏭️ Daily check sebelumnya masih berjalan — proses kali ini dilewati');
+    await this.runPass('Daily check', { full: true });
+  }
+
+  /**
+   * Proses susulan 03:05 dan 06:05 WIB. Semua langkahnya idempotent, jadi hanya
+   * mengerjakan yang LUPUT pada proses utama: router/RADIUS yang tadi tidak
+   * terjangkau (pelanggan baru diisolir begitu pulih, tidak menunggu tengah
+   * malam berikutnya), server yang sedang restart pukul 00:05, pengingat/tagihan
+   * yang terlewat. Pelanggan yang sudah isolir tidak dicek ulang di sini.
+   */
+  @Cron('5 3,6 * * *', { name: 'daily-check-catchup', timeZone: APP_TIMEZONE })
+  async handleCatchUp() {
+    await this.runPass('Proses susulan', { full: false });
+  }
+
+  private isBusy(): boolean {
+    if (!this.running) return false;
+    if (Date.now() - this.runningSince > STALE_RUN_MS) {
+      this.logger.error(
+        `⚠️ Proses harian sebelumnya sudah berjalan lebih dari ${STALE_RUN_MS / 3_600_000} jam tanpa selesai — dianggap macet dan tidak lagi menghalangi proses baru`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  private async runPass(label: string, opts: { full: boolean }) {
+    if (this.isBusy()) {
+      this.logger.warn(`⏭️ ${label}: proses sebelumnya masih berjalan — dilewati`);
       return;
     }
     this.running = true;
-    this.logger.log('⏰ Daily check dimulai...');
+    this.runningSince = Date.now();
+    this.logger.log(`⏰ ${label} dimulai (tanggal acuan ${ymdInAppTz()} ${APP_TIMEZONE})...`);
     try {
       // Tiap langkah berdiri sendiri: satu langkah gagal tidak boleh
       // membatalkan langkah sesudahnya (mis. isolir tetap jalan walau
       // pengecekan langganan mitra error).
-      await this.runStep('Cek langganan mitra kedaluwarsa', () =>
-        this.tenantSubscriptionsService.processExpiredSubscriptions(),
-      );
+      if (opts.full) {
+        await this.runStep('Cek langganan mitra kedaluwarsa', () =>
+          this.tenantSubscriptionsService.processExpiredSubscriptions(),
+        );
+      }
       await this.runStep('Generate tagihan', () => this.processAutoGenerateBills());
-      await this.runStep('Isolir otomatis', () => this.processAutoIsolir());
+      await this.runStep('Isolir otomatis', () => this.processAutoIsolir({ reconfirm: opts.full }));
       await this.runStep('Pengingat tagihan', () => this.processReminderCheck());
     } finally {
       this.running = false;
@@ -98,10 +167,11 @@ export class IsolirScheduler {
   }
 
   async runManually() {
-    if (this.running) {
+    if (this.isBusy()) {
       throw new ConflictException('Proses harian sedang berjalan, coba lagi beberapa saat lagi');
     }
     this.running = true;
+    this.runningSince = Date.now();
     this.logger.log('🔧 Manual trigger...');
     try {
       await this.processAutoGenerateBills();
@@ -144,7 +214,8 @@ export class IsolirScheduler {
       this.logger,
       MAX_BILL_LEAD_DAYS,
     );
-    const today = new Date();
+    const today = todayInAppTz();
+    const todayYmd = toYmd(today);
 
     const activeCustomers = await this.db
       .select({
@@ -168,23 +239,62 @@ export class IsolirScheduler {
     }
 
     const starts = inWindow.map((c) => toYmd(c.start)).sort();
-    const haveRows = await this.db
+    const firstStart = starts[0];
+    const lastStart = starts[starts.length - 1];
+    const ymd = (col: typeof bills.periodStart | typeof bills.periodEnd) =>
+      sql<string>`DATE_FORMAT(${col}, '%Y-%m-%d')`;
+
+    // 1) Periode yang sudah TERCAKUP tagihan (bukan hanya yang awal periodenya sama
+    //    persis): mis. pelanggan yang tanggal tagihannya diubah admin tepat setelah
+    //    membayar tidak ditagih lagi untuk hari-hari yang sudah ia bayar.
+    const coverRows = await this.db
       .select({
         customerId: bills.customerId,
-        periodStart: sql<string>`DATE_FORMAT(${bills.periodStart}, '%Y-%m-%d')`,
+        periodStart: ymd(bills.periodStart),
+        periodEnd: ymd(bills.periodEnd),
       })
       .from(bills)
       .where(
         and(
           ne(bills.status, 'cancelled'),
-          sql`${bills.periodStart} BETWEEN ${starts[0]} AND ${starts[starts.length - 1]}`,
+          sql`${bills.periodStart} <= ${lastStart}`,
+          sql`${bills.periodEnd} >= ${firstStart}`,
         ),
       );
-    const have = new Set(haveRows.map((r) => `${r.customerId}|${r.periodStart}`));
-    const todo = inWindow.filter((c) => !have.has(`${c.id}|${toYmd(c.start)}`));
+    const coverByCustomer = new Map<number, { periodStart: string; periodEnd: string }[]>();
+    for (const r of coverRows) {
+      const list = coverByCustomer.get(r.customerId) ?? [];
+      list.push(r);
+      coverByCustomer.set(r.customerId, list);
+    }
+    const isCovered = (c: { id: number; start: Date }) => {
+      const s = toYmd(c.start);
+      return (coverByCustomer.get(c.id) ?? []).some((r) => r.periodStart <= s && r.periodEnd >= s);
+    };
 
+    // 2) Pelanggan yang masih punya tagihan lewat jatuh tempo TIDAK ditagih lagi:
+    //    yang berhenti/terisolir hanya berutang satu tagihan itu sampai ia melunasinya.
+    const arrearsRows = await this.db
+      .select({ customerId: bills.customerId })
+      .from(bills)
+      .where(
+        and(
+          inArray(bills.customerId, inWindow.map((c) => c.id)),
+          inArray(bills.status, ['unpaid', 'overdue']),
+          sql`${bills.dueDate} < ${todayYmd}`,
+        ),
+      );
+    const inArrears = new Set(arrearsRows.map((r) => r.customerId));
+
+    const pending = inWindow.filter((c) => !isCovered(c));
+    const held = pending.filter((c) => inArrears.has(c.id));
+    const todo = pending.filter((c) => !inArrears.has(c.id));
+
+    if (held.length > 0) {
+      this.logger.log(`⏸️ ${held.length} pelanggan tidak ditagih periode baru karena masih menunggak: ${held.map((c) => c.name).join(', ')}`);
+    }
     if (todo.length === 0) {
-      this.logger.log(`✅ Semua tagihan untuk ${inWindow.length} pelanggan dalam jendela ${leadDays} hari sudah terbit`);
+      this.logger.log(`✅ Tidak ada tagihan baru yang perlu terbit (${inWindow.length} pelanggan dalam jendela ${leadDays} hari)`);
       return;
     }
 
@@ -226,13 +336,20 @@ export class IsolirScheduler {
    * pertimbangkan mengelompokkan per router atau menghentikan pelanggan yang
    * sudah terlalu lama menunggak (status 'terminated').
    */
-  async processAutoIsolir(): Promise<IsolirSummary> {
+  async processAutoIsolir(opts: { reconfirm?: boolean } = {}): Promise<IsolirSummary> {
+    // "Hari ini" dihitung aplikasi (WIB) dan dikirim sebagai parameter — bukan CURDATE()
+    // database yang bisa berzona waktu lain.
+    const todayYmd = ymdInAppTz();
     await this.db
       .update(bills)
       .set({ status: 'overdue', updatedAt: new Date() })
-      .where(and(eq(bills.status, 'unpaid'), sql`${bills.dueDate} < CURDATE()`));
+      .where(and(eq(bills.status, 'unpaid'), sql`${bills.dueDate} < ${todayYmd}`));
 
-    const candidates = await this.loadIsolirCandidates();
+    // Proses susulan (reconfirm=false) hanya menangani pelanggan yang masih 'active'
+    // — yang tadi gagal diputus atau baru jatuh tempo — tanpa mengulang pengecekan
+    // router untuk ratusan pelanggan yang sudah isolir.
+    const all = await this.loadIsolirCandidates(todayYmd);
+    const candidates = opts.reconfirm === false ? all.filter((c) => c.status === 'active') : all;
     const summary: IsolirSummary = {
       candidates: candidates.length,
       newlyIsolated: 0,
@@ -299,7 +416,7 @@ export class IsolirScheduler {
   }
 
   /** Satu query: semua tagihan menunggak + pelanggan + router PPPoE-nya. */
-  private async loadIsolirCandidates(): Promise<IsolirCandidate[]> {
+  private async loadIsolirCandidates(todayYmd: string): Promise<IsolirCandidate[]> {
     const rows = await this.db
       .select({
         billId: bills.id,
@@ -330,7 +447,7 @@ export class IsolirScheduler {
       .where(
         and(
           inArray(bills.status, ['unpaid', 'overdue']),
-          sql`${bills.dueDate} < CURDATE()`,
+          sql`${bills.dueDate} < ${todayYmd}`,
           inArray(customers.status, ['active', 'isolated']),
         ),
       )
@@ -464,8 +581,23 @@ export class IsolirScheduler {
 
   // ─── Pengingat tagihan ─────────────────────────────────────────────────
 
+  /**
+   * Satu pengingat per tagihan, dikirim pada proses pertama setelah jatuh temponya
+   * masuk dalam REMINDER_DAYS_BEFORE_DUE hari ke depan (dan belum terlewat).
+   *
+   * Memakai JENDELA [hari ini, hari ini + 3], bukan "tepat 3 hari lagi" seperti dulu:
+   * pencocokan harian-persis membuat satu proses yang terlewat (server restart,
+   * router/WA gangguan, zona waktu bergeser) = pengingat tagihan itu hilang untuk
+   * selamanya, dan tagihan yang baru terbit H-2 tidak pernah diingatkan. Pengingat
+   * yang sudah terkirim dikenali dari log WA ('sent'), jadi proses susulan tidak
+   * mengirim dobel.
+   */
   async processReminderCheck(): Promise<number> {
-    const reminderBills = await this.db
+    const today = todayInAppTz();
+    const todayYmd = toYmd(today);
+    const horizonYmd = toYmd(addDays(today, REMINDER_DAYS_BEFORE_DUE));
+
+    const dueSoon = await this.db
       .select({
         id: bills.id,
         tenantId: bills.tenantId,
@@ -482,36 +614,59 @@ export class IsolirScheduler {
       .innerJoin(customers, and(eq(bills.customerId, customers.id), eq(customers.tenantId, bills.tenantId)))
       .where(
         and(
-          sql`${bills.dueDate} = DATE_ADD(CURDATE(), INTERVAL ${sql.raw(String(REMINDER_DAYS_BEFORE_DUE))} DAY)`,
+          sql`${bills.dueDate} >= ${todayYmd}`,
+          sql`${bills.dueDate} <= ${horizonYmd}`,
           eq(bills.status, 'unpaid'),
           // Pelanggan yang sedang isolir/ditangguhkan/berhenti tidak diberi
           // pengingat "bayar supaya tidak diputus".
           eq(customers.status, 'active'),
         ),
+      )
+      .orderBy(asc(bills.dueDate), asc(bills.id));
+
+    if (dueSoon.length === 0) return 0;
+
+    const sentRows = await this.db
+      .select({ billId: whatsappLogs.billId })
+      .from(whatsappLogs)
+      .where(
+        and(
+          eq(whatsappLogs.trigger, 'reminder'),
+          eq(whatsappLogs.status, 'sent'),
+          inArray(whatsappLogs.billId, dueSoon.map((b) => b.id)),
+        ),
       );
+    const alreadySent = new Set(sentRows.map((r) => r.billId));
+    const reminderBills = dueSoon.filter((b) => !alreadySent.has(b.id));
 
     if (reminderBills.length === 0) return 0;
 
-    this.logger.log(`📢 Pengingat H-${REMINDER_DAYS_BEFORE_DUE}: ${reminderBills.length} pelanggan akan dinotifikasi`);
+    this.logger.log(`📢 Pengingat tagihan: ${reminderBills.length} pelanggan akan dinotifikasi`);
 
     let queued = 0;
     for (const item of reminderBills) {
       if (!item.phone) continue;
       try {
-        await this.whatsappService.queueNotification({
-          tenantId: item.tenantId,
-          phone: item.phone,
-          message: await this.whatsappTemplatesService.render('reminder', item.tenantId, {
-            name: item.name,
-            billNumber: item.billNumber,
-            amount: formatRupiah(item.amount),
-            dueDate: formatTanggal(item.dueDate),
-          }),
-          trigger: 'reminder',
-          customerId: item.customerId,
-          billId: item.id,
-        });
-        queued++;
+        const daysLeft = Math.round((parseYmd(item.dueDate).getTime() - today.getTime()) / 86_400_000);
+        const ok = await this.whatsappService.queueNotification(
+          {
+            tenantId: item.tenantId,
+            phone: item.phone,
+            message: await this.whatsappTemplatesService.render('reminder', item.tenantId, {
+              name: item.name,
+              billNumber: item.billNumber,
+              amount: formatRupiah(item.amount),
+              dueDate: formatTanggal(item.dueDate),
+              sisaWaktu: sisaWaktuText(daysLeft),
+            }),
+            trigger: 'reminder',
+            customerId: item.customerId,
+            billId: item.id,
+          },
+          // Satu rantai pengiriman per tagihan per hari, walau proses dijalankan berkali-kali.
+          { jobId: `reminder-${item.id}-${todayYmd}` },
+        );
+        if (ok) queued++;
       } catch (err) {
         this.logger.error(`❌ Pengingat tagihan #${item.id} gagal diantrekan: ${err}`);
       }

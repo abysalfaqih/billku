@@ -1,7 +1,7 @@
 import {
   Injectable, Inject, NotFoundException, BadRequestException, ConflictException,
 } from '@nestjs/common';
-import { eq, and, or, count, desc, asc, ne, like, sql } from 'drizzle-orm';
+import { eq, and, or, count, desc, asc, ne, like, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { bills, customers, packages, tenants, payments, users } from '../../database/schema';
@@ -12,6 +12,7 @@ import {
   firstBillingDateOnOrAfter, parseYmd, periodFromStart, startOfDay, toYmd,
 } from './billing-period.util';
 import type { BillPeriod } from './billing-period.util';
+import { todayInAppTz, ymdInAppTz } from '../../common/utils/app-time.util';
 
 // Yang dibutuhkan untuk membuat nomor tagihan: bisa koneksi biasa ataupun transaksi.
 type SelectCapable = Pick<DrizzleClient, 'select'>;
@@ -64,15 +65,50 @@ export class BillingService {
     if (!pkg) throw new NotFoundException('Paket pelanggan tidak ditemukan');
 
     const period = this.calculatePeriod(customer.billingDate, periodStart);
+    const startYmd = toYmd(period.periodStart);
 
-    const [existing] = await this.db
-      .select({ id: bills.id, status: bills.status })
+    // Satu query, tagihan yang dibatalkan diabaikan. (Dulu `limit(1)` tanpa
+    // menyaring status: kalau yang terambil kebetulan tagihan batal padahal ada
+    // tagihan aktif untuk periode yang sama, tagihan dobel ikut terbuat.)
+    const ymd = (col: typeof bills.periodStart | typeof bills.periodEnd) =>
+      sql<string>`DATE_FORMAT(${col}, '%Y-%m-%d')`;
+    const covering = await this.db
+      .select({ billNumber: bills.billNumber, periodStart: ymd(bills.periodStart), periodEnd: ymd(bills.periodEnd) })
       .from(bills)
-      .where(and(eq(bills.customerId, customerId), eq(bills.tenantId, tenantId), eq(bills.periodStart, period.periodStart)))
+      .where(and(
+        eq(bills.customerId, customerId),
+        eq(bills.tenantId, tenantId),
+        ne(bills.status, 'cancelled'),
+        sql`${bills.periodStart} <= ${startYmd}`,
+        sql`${bills.periodEnd} >= ${startYmd}`,
+      ))
       .limit(1);
+    if (covering[0]) {
+      throw new ConflictException(
+        covering[0].periodStart === startYmd
+          ? 'Tagihan untuk periode ini sudah ada'
+          : `Periode ini sudah tercakup tagihan ${covering[0].billNumber} (${covering[0].periodStart} s/d ${covering[0].periodEnd})`,
+      );
+    }
 
-    if (existing && existing.status !== 'cancelled') {
-      throw new ConflictException('Tagihan untuk periode ini sudah ada');
+    // Selama masih ada tagihan yang lewat jatuh tempo, TIDAK ada tagihan baru:
+    // pelanggan yang berhenti/terisolir hanya berutang satu tagihan itu sampai
+    // ia membayarnya, bukan satu per bulan.
+    const [overdue] = await this.db
+      .select({ billNumber: bills.billNumber })
+      .from(bills)
+      .where(and(
+        eq(bills.customerId, customerId),
+        eq(bills.tenantId, tenantId),
+        inArray(bills.status, ['unpaid', 'overdue']),
+        sql`${bills.dueDate} < ${ymdInAppTz()}`,
+      ))
+      .orderBy(asc(bills.dueDate))
+      .limit(1);
+    if (overdue) {
+      throw new ConflictException(
+        `Pelanggan masih punya tagihan menunggak (${overdue.billNumber}) — tagihan baru tidak dibuat selama masih menunggak`,
+      );
     }
 
     const billNumber = await this.generateBillNumber(tenantId, period.periodStart);
@@ -210,10 +246,10 @@ export class BillingService {
         .leftJoin(users, eq(payments.createdBy, users.id))
         .where(and(eq(payments.billId, id), eq(payments.tenantId, user.tenantId)))
         .orderBy(desc(payments.paidAt)),
-      // Selisih hari dihitung oleh database (CURDATE()), sama seperti scheduler
-      // dan laporan umur piutang: positif = terlambat, negatif = belum jatuh tempo.
+      // Selisih hari terhadap tanggal WIB (sama dengan yang dipakai scheduler):
+      // positif = terlambat, negatif = belum jatuh tempo.
       this.db
-        .select({ daysOverdue: sql<number>`DATEDIFF(CURDATE(), ${bills.dueDate})` })
+        .select({ daysOverdue: sql<number>`DATEDIFF(${ymdInAppTz()}, ${bills.dueDate})` })
         .from(bills)
         .where(and(eq(bills.id, id), eq(bills.tenantId, user.tenantId)))
         .limit(1),
@@ -355,7 +391,7 @@ export class BillingService {
     customerId: number,
     months: number,
     tenantId: string,
-    today: Date = new Date(),
+    today: Date = todayInAppTz(),
   ): Promise<AdvancePlan> {
     if (!Number.isInteger(months) || months < 1 || months > 12) {
       throw new BadRequestException('Jumlah bulan harus antara 1 dan 12');
@@ -472,7 +508,7 @@ export class BillingService {
 
   private calculatePeriod(billingDate: number, periodStart?: Date): BillPeriod {
     if (periodStart) return periodFromStart(periodStart);
-    const today = new Date();
+    const today = todayInAppTz();
     return periodFromStart(new Date(today.getFullYear(), today.getMonth(), billingDate));
   }
 

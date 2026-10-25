@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { SelectInput } from '@/components/ui/select-input';
@@ -23,11 +23,18 @@ export function PayDialog({ open, onClose, bill }: PayDialogProps) {
   const [method, setMethod] = useState('cash');
   const [notes, setNotes] = useState('');
   const createPayment = useCreatePayment(onClose);
+  // Penjaga klik beruntun (status "sedang mengirim" tiba sesaat setelah klik pertama).
+  const submitting = useRef(false);
 
   if (!bill) return null;
 
   const handlePay = () => {
-    createPayment.mutate({ billId: bill.id, paymentMethod: method as any, notes: notes || undefined });
+    if (submitting.current) return;
+    submitting.current = true;
+    createPayment.mutate(
+      { billId: bill.id, paymentMethod: method as any, notes: notes || undefined },
+      { onSettled: () => { submitting.current = false; } },
+    );
   };
 
   return (
@@ -76,7 +83,7 @@ export function PayDialog({ open, onClose, bill }: PayDialogProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Total</span>
             <span style={{ fontSize: 16, fontWeight: 800, color: '#4F46E5' }}>
-              {formatRp(bill.amount)}
+              {formatRp(bill.totalAmount)}
             </span>
           </div>
         </div>

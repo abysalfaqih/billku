@@ -7,7 +7,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
-import { eq, and, or, ne, count, desc, like } from 'drizzle-orm';
+import { eq, and, or, ne, count, desc, like, asc, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
 import { payments, bills, customers, users } from '../../database/schema';
@@ -16,7 +16,13 @@ import { BillingService } from '../billing/billing.service';
 import { parseYmd, periodFromStart } from '../billing/billing-period.util';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsappTemplatesService } from '../whatsapp-templates/whatsapp-templates.service';
-import { formatRupiah } from '../whatsapp-templates/whatsapp-templates.defaults';
+import {
+  formatRupiah,
+  formatTanggal,
+  paymentKeterangan,
+} from '../whatsapp-templates/whatsapp-templates.defaults';
+import type { PaymentNoteKind } from '../whatsapp-templates/whatsapp-templates.defaults';
+import { ymdInAppTz } from '../../common/utils/app-time.util';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { CreatePaymentDto } from './dto/create-payment.dto';
 import type { QueryPaymentDto } from './dto/query-payment.dto';
@@ -28,11 +34,15 @@ import type { AdvancePreviewDto, CreateAdvancePaymentDto } from './dto/advance-p
  *  - reactivated: koneksi sudah dipulihkan DAN status pelanggan kembali 'active'
  *  - failed     : pembayaran tetap tercatat, tapi koneksi gagal dipulihkan
  *                 (router/RADIUS tidak terjangkau) → status pelanggan TETAP 'isolated'
+ *  - blocked    : pembayaran tercatat, tetapi pelanggan masih punya tagihan LAIN yang
+ *                 sudah lewat jatuh tempo → koneksi/status tidak diubah. Layanan baru
+ *                 dibuka setelah SEMUA tagihan menunggak lunas (atau dibatalkan admin).
  */
 export type ReactivationResult =
   | { status: 'not_needed' }
   | { status: 'reactivated' }
-  | { status: 'failed'; message: string };
+  | { status: 'failed'; message: string }
+  | { status: 'blocked'; remaining: { billNumber: string; totalAmount: string; dueDate: string }[] };
 
 @Injectable()
 export class PaymentsService {
@@ -78,66 +88,129 @@ export class PaymentsService {
         phone: customers.phone,
       })
       .from(customers)
-      .where(eq(customers.id, bill.customerId))
+      .where(and(eq(customers.id, bill.customerId), eq(customers.tenantId, user.tenantId)))
       .limit(1);
 
-    // Buat record pembayaran
-    const [result] = await this.db.insert(payments).values({
-      tenantId: user.tenantId,
-      billId: bill.id,
-      customerId: bill.customerId,
-      amount: bill.totalAmount,
-      paymentMethod: dto.paymentMethod,
-      notes: dto.notes,
-      createdBy: user.userId,
+    // Pembayaran + pelunasan tagihan dalam SATU transaksi, dan pelunasan dijaga
+    // oleh kondisi status. Dulu keduanya terpisah tanpa penjagaan: klik ganda /
+    // dua admin yang memproses tagihan yang sama menghasilkan DUA catatan bayar
+    // untuk satu tagihan (laporan pemasukan membengkak), dan kegagalan di
+    // tengah meninggalkan pembayaran tercatat tapi tagihan masih "belum lunas" —
+    // tagihan itu lalu tetap kena isolir/pengingat padahal pelanggan sudah bayar.
+    const paymentId = await this.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(bills)
+        .set({ status: 'paid', updatedAt: new Date() })
+        .where(
+          and(
+            eq(bills.id, bill.id),
+            eq(bills.tenantId, user.tenantId),
+            inArray(bills.status, ['unpaid', 'overdue']),
+          ),
+        );
+      if (!updated || updated.affectedRows !== 1) {
+        throw new ConflictException(
+          'Tagihan ini baru saja dibayar atau berubah status. Muat ulang halaman untuk melihat data terbaru.',
+        );
+      }
+
+      const [inserted] = await tx.insert(payments).values({
+        tenantId: user.tenantId,
+        billId: bill.id,
+        customerId: bill.customerId,
+        amount: bill.totalAmount,
+        paymentMethod: dto.paymentMethod,
+        notes: dto.notes,
+        createdBy: user.userId,
+      });
+      return Number(inserted.insertId);
     });
 
-    // Update tagihan → paid
-    await this.db
-      .update(bills)
-      .set({ status: 'paid', updatedAt: new Date() })
-      .where(eq(bills.id, bill.id));
+    // Tagihan LAIN milik pelanggan ini yang sudah lewat jatuh tempo dan belum lunas.
+    // Satu pelanggan bisa menunggak lebih dari satu tagihan (data lama, atau tagihan
+    // yang dibuat manual). Membayar salah satunya TIDAK boleh langsung membuka
+    // layanan: kalau dibuka, isolir malam itu memutusnya lagi dan pelanggan
+    // mengira sudah bayar tapi internetnya mati lagi.
+    const remaining = customer ? await this.findPastDueBills(bill.customerId, user.tenantId) : [];
 
-    // Jika pelanggan sedang diisolir → aktifkan kembali (koneksi + status)
     let reactivation: ReactivationResult = { status: 'not_needed' };
     if (customer?.status === 'isolated') {
-      reactivation = await this.reactivateIsolatedCustomer(bill.customerId, user.tenantId, customer);
+      reactivation =
+        remaining.length > 0
+          ? { status: 'blocked', remaining }
+          : await this.reactivateIsolatedCustomer(bill.customerId, user.tenantId, customer);
     } else if (customer?.status === 'active' && customer.connectionType === 'pppoe' && bill.status === 'overdue') {
-      // Isolir otomatis memblokir akun di RADIUS LEBIH DULU, baru memutus sesi di
-      // router dan baru mengubah status jadi 'isolated'. Kalau router tidak
-      // terjangkau saat itu, pelanggan sengaja tetap 'active' (dicoba lagi malam
-      // berikutnya) — padahal blokir RADIUS-nya sudah terpasang. Tanpa langkah ini,
-      // pelanggan yang membayar di sela-sela itu tidak akan pernah dibuka lagi.
-      await this.releaseLingeringRadiusBlock(bill.customerId, user.tenantId, customer);
+      if (remaining.length > 0) {
+        // Blokir RADIUS yang mungkin tertinggal sengaja dibiarkan: pelanggan ini
+        // memang masih menunggak dan akan diisolir pada proses berikutnya.
+        reactivation = { status: 'blocked', remaining };
+      } else {
+        // Isolir otomatis memblokir akun di RADIUS LEBIH DULU, baru memutus sesi di
+        // router dan baru mengubah status jadi 'isolated'. Kalau router tidak
+        // terjangkau saat itu, pelanggan sengaja tetap 'active' (dicoba lagi malam
+        // berikutnya) — padahal blokir RADIUS-nya sudah terpasang. Tanpa langkah ini,
+        // pelanggan yang membayar di sela-sela itu tidak akan pernah dibuka lagi.
+        await this.releaseLingeringRadiusBlock(bill.customerId, user.tenantId, customer);
+      }
     }
 
-    // Kirim WA notifikasi pembayaran
-    const paidAtStr = new Date().toLocaleDateString('id-ID', {
-      day: '2-digit', month: 'long', year: 'numeric',
-    });
-
+    // Notifikasi WA — pembayaran sudah tersimpan, jadi kegagalan di sini (render
+    // template, antrean) tidak boleh membuat API menjawab error: admin akan
+    // mengulang dan malah ditolak "sudah dibayar".
     if (customer) {
-      await this.whatsappService.queueNotification({
-        tenantId: user.tenantId,
-        phone: customer.phone,
-        message: await this.whatsappTemplatesService.render(
-          'payment',
-          user.tenantId,
-          {
+      try {
+        let note: PaymentNoteKind;
+        if (reactivation.status === 'reactivated') note = { kind: 'reactivated' };
+        else if (reactivation.status === 'failed') note = { kind: 'pending-activation' };
+        else if (remaining.length > 0) {
+          note = {
+            kind: 'arrears',
+            billNumbers: remaining.map((r) => r.billNumber),
+            isolated: customer.status === 'isolated',
+          };
+        } else note = { kind: 'thanks' };
+
+        await this.whatsappService.queueNotification({
+          tenantId: user.tenantId,
+          phone: customer.phone,
+          message: await this.whatsappTemplatesService.render('payment', user.tenantId, {
             name: customer.name,
             billNumber: bill.billNumber,
             amount: formatRupiah(bill.totalAmount),
-            paidAt: paidAtStr,
-          },
-        ),
-        trigger: 'payment',
-        customerId: bill.customerId,
-        billId: bill.id,
-      });
+            paidAt: formatTanggal(ymdInAppTz()),
+            keterangan: paymentKeterangan(note),
+          }),
+          trigger: 'payment',
+          customerId: bill.customerId,
+          billId: bill.id,
+        });
+      } catch (err) {
+        this.logger.error(`WA konfirmasi bayar gagal diantrekan: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
-    const payment = await this.findOne(Number(result.insertId), user);
+    const payment = await this.findOne(paymentId, user);
     return { ...payment, reactivation };
+  }
+
+  /** Tagihan belum lunas yang jatuh temponya sudah lewat (menurut tanggal WIB), terlama dulu. */
+  private async findPastDueBills(customerId: number, tenantId: string) {
+    return this.db
+      .select({
+        billNumber: bills.billNumber,
+        totalAmount: bills.totalAmount,
+        dueDate: sql<string>`DATE_FORMAT(${bills.dueDate}, '%Y-%m-%d')`,
+      })
+      .from(bills)
+      .where(
+        and(
+          eq(bills.customerId, customerId),
+          eq(bills.tenantId, tenantId),
+          inArray(bills.status, ['unpaid', 'overdue']),
+          sql`${bills.dueDate} < ${ymdInAppTz()}`,
+        ),
+      )
+      .orderBy(asc(bills.dueDate), asc(bills.id));
   }
 
   // ─── Bayar di muka ─────────────────────────────────────────────────────────
@@ -266,7 +339,8 @@ export class PaymentsService {
           name: plan.customer.name,
           billNumber: first === last ? first : `${first} s/d ${last}`,
           amount: formatRupiah(plan.totalAmount),
-          paidAt: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }),
+          paidAt: formatTanggal(ymdInAppTz()),
+          keterangan: paymentKeterangan({ kind: 'thanks' }),
         }),
         trigger: 'payment',
         customerId: dto.customerId,

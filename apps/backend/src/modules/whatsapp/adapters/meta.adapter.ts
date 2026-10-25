@@ -4,6 +4,7 @@ import { normalizePhone } from './whatsapp-adapter.interface';
 
 export class MetaAdapter implements IWhatsAppAdapter {
   private readonly logger = new Logger(MetaAdapter.name);
+  private readonly timeoutMs = 15000;
 
   constructor(
     private readonly accessToken: string,
@@ -14,9 +15,13 @@ export class MetaAdapter implements IWhatsAppAdapter {
     const to = normalizePhone(phone);
     const url = `https://graph.facebook.com/v18.0/${this.phoneNumberId}/messages`;
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
     try {
       const response = await fetch(url, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json',
@@ -48,8 +53,12 @@ export class MetaAdapter implements IWhatsAppAdapter {
         error: String(error?.message ?? 'Unknown error'),
       };
     } catch (err) {
-      this.logger.error(`Meta WA send error: ${err}`);
-      return { success: false, error: String(err) };
+      const timedOut = err instanceof Error && err.name === 'AbortError';
+      const detail = timedOut ? `Timeout setelah ${this.timeoutMs}ms — Meta tidak merespons` : String(err);
+      this.logger.error(`Meta WA send error: ${detail}`);
+      return { success: false, error: detail };
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
