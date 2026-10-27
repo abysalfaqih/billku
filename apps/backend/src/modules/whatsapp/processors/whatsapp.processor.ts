@@ -1,11 +1,12 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger, Inject } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { eq, and } from 'drizzle-orm';
 import { DRIZZLE } from '../../../database/database.module';
 import type { DrizzleClient } from '../../../database/database.module';
 import { whatsappConfigs, whatsappLogs } from '../../../database/schema';
 import { WhatsAppAdapterFactory } from '../adapters/whatsapp-adapter.factory';
+import type { IWhatsAppAdapter } from '../adapters/whatsapp-adapter.interface';
 import type { WhatsAppJobData } from '../whatsapp-job.interface';
 
 @Processor('whatsapp')
@@ -21,7 +22,8 @@ export class WhatsAppProcessor extends WorkerHost {
    * (attempts + backoff di WhatsAppService). Dulu kegagalan hanya dicatat lalu
    * proses dianggap selesai, jadi pengulangan itu tidak pernah terjadi dan satu
    * gangguan sesaat di provider membuat pengingat/isolir tidak sampai ke pelanggan.
-   * Baris log `failed` ditulis HANYA pada percobaan terakhir (satu pesan = satu baris).
+   * Baris log `failed` ditulis HANYA pada percobaan terakhir (satu pesan = satu baris),
+   * lalu error tetap dilempar supaya job tercatat gagal di BullMQ.
    */
   async process(job: Job<WhatsAppJobData>): Promise<void> {
     const { tenantId, phone, message, trigger } = job.data;
@@ -48,9 +50,23 @@ export class WhatsAppProcessor extends WorkerHost {
       return;
     }
 
+    let adapter: IWhatsAppAdapter;
+    try {
+      adapter = WhatsAppAdapterFactory.create(config);
+    } catch (err) {
+      // Pengaturan provider salah (mis. Domain API / phone_number_id kosong): diulang
+      // 5 kali pun hasilnya sama, jadi gagal langsung — tidak menghabiskan ~15 menit
+      // percobaan ulang untuk setiap pesan. UnrecoverableError = BullMQ tidak mengulang.
+      const reason = err instanceof Error ? err.message : String(err);
+      await this.writeLog(job.data, config.provider, 'failed', null, reason);
+      this.logger.error(
+        `❌ WA [${config.provider}] → ${phone} (${trigger}) gagal, pengaturan provider tidak valid (tidak diulang): ${reason}`,
+      );
+      throw new UnrecoverableError(reason);
+    }
+
     let result: { success: boolean; messageId?: string; error?: string };
     try {
-      const adapter = WhatsAppAdapterFactory.create(config);
       result = await adapter.send(phone, message);
     } catch (err) {
       result = { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -77,6 +93,11 @@ export class WhatsAppProcessor extends WorkerHost {
 
     await this.writeLog(job.data, config.provider, 'failed', null, result.error ?? 'Unknown error');
     this.logger.error(`❌ WA [${config.provider}] → ${phone} gagal setelah ${maxAttempts} percobaan: ${result.error}`);
+    // Percobaan terakhir juga dilempar: BullMQ harus mencatatnya GAGAL, bukan "selesai".
+    // Dulu fungsi ini kembali normal di sini, jadi pesan yang gagal total dianggap job
+    // sukses dan id-nya (jobId pengingat) tertahan di antrean — proses susulan 03:05/06:05
+    // diam-diam mengabaikannya (lihat removeOnFail di WhatsAppService).
+    throw new Error(result.error ?? 'Pengiriman WA gagal');
   }
 
   // Pesan yang SUDAH terkirim tidak boleh memicu pengiriman ulang hanya karena

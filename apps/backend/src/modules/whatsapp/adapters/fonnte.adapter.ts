@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { IWhatsAppAdapter, WhatsAppSendResult } from './whatsapp-adapter.interface';
 import { normalizePhone } from './whatsapp-adapter.interface';
+import { readJsonResponse } from './http-response.util';
 
 export class FonnteAdapter implements IWhatsAppAdapter {
   private readonly logger = new Logger(FonnteAdapter.name);
@@ -32,7 +33,7 @@ export class FonnteAdapter implements IWhatsAppAdapter {
         signal: controller.signal,
       });
 
-      const data = await response.json() as Record<string, unknown>;
+      const data = await readJsonResponse(response, 'Fonnte');
 
       if (data.status === true) {
         return {
@@ -43,7 +44,7 @@ export class FonnteAdapter implements IWhatsAppAdapter {
 
       return {
         success: false,
-        error: String(data.reason ?? 'Unknown error'),
+        error: String(data.reason ?? `Respons tidak dikenali (HTTP ${response.status})`),
       };
     } catch (err) {
       const timedOut = err instanceof Error && err.name === 'AbortError';

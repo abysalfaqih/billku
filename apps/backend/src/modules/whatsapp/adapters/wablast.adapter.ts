@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { IWhatsAppAdapter, WhatsAppSendResult } from './whatsapp-adapter.interface';
 import { normalizePhone } from './whatsapp-adapter.interface';
+import { readJsonResponse } from './http-response.util';
 
 interface WablasSendResponse {
   status: boolean;
@@ -43,7 +44,11 @@ export class WaBlastAdapter implements IWhatsAppAdapter {
         signal: controller.signal,
       });
 
-      const data = (await response.json()) as WablasSendResponse;
+      const data = (await readJsonResponse(
+        response,
+        'WA Blast',
+        `periksa "Domain API" di pengaturan WhatsApp (sekarang: ${this.domain})`,
+      )) as unknown as WablasSendResponse;
 
       if (response.ok && data.status === true) {
         const messages = data.data?.messages;
@@ -56,7 +61,7 @@ export class WaBlastAdapter implements IWhatsAppAdapter {
 
       return {
         success: false,
-        error: data.message ?? 'Unknown error',
+        error: data.message ? String(data.message) : `Respons tidak dikenali (HTTP ${response.status})`,
       };
     } catch (err) {
       const detail = this.describeError(err);

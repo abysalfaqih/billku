@@ -664,6 +664,9 @@ export class IsolirScheduler implements OnApplicationBootstrap {
             billId: item.id,
           },
           // Satu rantai pengiriman per tagihan per hari, walau proses dijalankan berkali-kali.
+          // Pesan yang masih berjalan/menunggu percobaan ulang atau sudah sukses tidak
+          // diantre lagi; yang GAGAL FINAL dilepas (lihat WhatsAppService) sehingga proses
+          // susulan 03:05/06:05 benar-benar mencoba ulang.
           { jobId: `reminder-${item.id}-${todayYmd}` },
         );
         if (ok) queued++;

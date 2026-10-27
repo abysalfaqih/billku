@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { IWhatsAppAdapter, WhatsAppSendResult } from './whatsapp-adapter.interface';
 import { normalizePhone } from './whatsapp-adapter.interface';
+import { readJsonResponse } from './http-response.util';
 
 export class MetaAdapter implements IWhatsAppAdapter {
   private readonly logger = new Logger(MetaAdapter.name);
@@ -37,7 +38,7 @@ export class MetaAdapter implements IWhatsAppAdapter {
         }),
       });
 
-      const data = await response.json() as Record<string, unknown>;
+      const data = await readJsonResponse(response, 'Meta WhatsApp');
 
       if (response.ok) {
         const messages = data.messages as Array<{ id: string }> | undefined;
@@ -50,7 +51,7 @@ export class MetaAdapter implements IWhatsAppAdapter {
       const error = data.error as Record<string, unknown> | undefined;
       return {
         success: false,
-        error: String(error?.message ?? 'Unknown error'),
+        error: String(error?.message ?? `Respons tidak dikenali (HTTP ${response.status})`),
       };
     } catch (err) {
       const timedOut = err instanceof Error && err.name === 'AbortError';

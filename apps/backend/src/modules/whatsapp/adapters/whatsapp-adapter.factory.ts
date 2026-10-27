@@ -4,6 +4,19 @@ import { FonnteAdapter } from './fonnte.adapter';
 import { WaBlastAdapter } from './wablast.adapter';
 import { MetaAdapter } from './meta.adapter';
 
+// extraConfig yang bukan JSON valid dulu muncul sebagai galat JSON.parse yang
+// membingungkan ("Unexpected token ... in JSON at position 0").
+function parseExtraConfig<T extends object>(config: WhatsappConfig): Partial<T> {
+  if (!config.extraConfig) return {};
+  try {
+    return JSON.parse(config.extraConfig) as Partial<T>;
+  } catch {
+    throw new Error(
+      `Pengaturan tambahan (extraConfig) provider '${config.provider}' bukan JSON yang valid — simpan ulang pengaturan WhatsApp`,
+    );
+  }
+}
+
 export class WhatsAppAdapterFactory {
   static create(config: WhatsappConfig): IWhatsAppAdapter {
     switch (config.provider) {
@@ -13,9 +26,7 @@ export class WhatsAppAdapterFactory {
       case 'wablast': {
         // WA Blast cuma butuh domain dari extraConfig — token (apiKey) sudah
         // string utuh dari dashboard Wablas, dipakai apa adanya.
-        const extra = config.extraConfig
-          ? (JSON.parse(config.extraConfig) as { domain?: string })
-          : {};
+        const extra = parseExtraConfig<{ domain: string }>(config);
 
         if (!extra.domain) {
           throw new Error("WA Blast adapter butuh 'domain' di extraConfig");
@@ -26,9 +37,7 @@ export class WhatsAppAdapterFactory {
 
       case 'meta': {
         // Meta butuh phone_number_id dari extraConfig
-        const extra = config.extraConfig
-          ? (JSON.parse(config.extraConfig) as { phone_number_id?: string })
-          : {};
+        const extra = parseExtraConfig<{ phone_number_id: string }>(config);
 
         if (!extra.phone_number_id) {
           throw new Error('Meta adapter butuh phone_number_id di extraConfig');
