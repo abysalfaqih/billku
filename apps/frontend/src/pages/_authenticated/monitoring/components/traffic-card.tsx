@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
 import { useSessionTraffic } from '@/hooks/useMonitoring';
 import {
   BASE_Y,
   CHART_H,
   CHART_W,
+  MID_Y,
+  PLOT_W,
   TOP_Y,
   TRAFFIC_POLL_MS,
   appendSample,
   buildTrace,
+  formatAxis,
   formatBps,
   formatBpsParts,
+  probeAt,
   toSample,
 } from './traffic-trace';
 import type { TrafficSample } from './traffic-trace';
@@ -62,14 +67,35 @@ const CARD = {
   up: { label: 'Upload', color: 'var(--chart-up)', glow: 'var(--chart-up-glow)', Icon: ArrowUpFromLine },
 } as const;
 
+// Angka di garis skala: kecil, dengan "halo" warna kartu supaya tetap terbaca bila tertimpa garis data.
+const AXIS_TEXT = {
+  fontSize: 10, fill: 'var(--text-2)', paintOrder: 'stroke', stroke: 'var(--surface)',
+  strokeWidth: 3, strokeLinejoin: 'round',
+} as const;
+
 export function TrafficCard({ kind, samples, now, intervalMs, emptyLabel = 'Mengumpulkan data…' }: CardProps) {
   const { label, color, glow, Icon } = CARD[kind];
   const points = useMemo(
     () => samples.map((s) => ({ t: s.t, v: kind === 'down' ? s.down : s.up })),
     [samples, kind],
   );
-  const trace = buildTrace(points, now, intervalMs);
+
+  // Skala diingat antarframe agar tidak turun-naik tiap polling (lihat pickScale). Kalau data
+  // berganti total, skala yang usang langsung turun sendiri pada frame pertama berkat pickScale.
+  const scaleRef = useRef<number | null>(null);
+  const trace = buildTrace(points, now, intervalMs, scaleRef.current);
+  if (trace.hasLine) scaleRef.current = trace.scale;
   const big = trace.latest === null ? null : formatBpsParts(trace.latest);
+
+  // Info saat kursor diarahkan / grafik disentuh: posisi dalam koordinat grafik (0–CHART_W).
+  const [hoverX, setHoverX] = useState<number | null>(null);
+  const onPointer = (e: PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width > 0) setHoverX(((e.clientX - r.left) / r.width) * CHART_W);
+  };
+  const probe = hoverX !== null && trace.hasLine ? probeAt(points, now, intervalMs, hoverX, trace.scale) : null;
+  const anchor = probe ? probe.x / PLOT_W : 0;
+  const tipBelow = probe ? probe.y < 40 : false;
 
   return (
     <div
@@ -99,45 +125,89 @@ export function TrafficCard({ kind, samples, now, intervalMs, emptyLabel = 'Meng
         <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{big ? big.unit : ''}</span>
       </div>
 
-      <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-        width="100%"
-        role="img"
-        aria-label={`Grafik kecepatan ${label.toLowerCase()} 60 detik terakhir`}
-        style={{ display: 'block', marginTop: 10 }}
+      <div
+        data-testid={`traffic-${kind}-chart`}
+        onPointerMove={onPointer}
+        onPointerDown={onPointer}
+        onPointerLeave={() => setHoverX(null)}
+        onPointerCancel={() => setHoverX(null)}
+        style={{ position: 'relative', marginTop: 10, cursor: 'crosshair', touchAction: 'pan-y' }}
       >
-        <line x1="0" y1={TOP_Y} x2={CHART_W} y2={TOP_Y} style={{ stroke: 'var(--chart-grid)', strokeDasharray: '3 5' }} />
-        <line x1="0" y1={(TOP_Y + BASE_Y) / 2} x2={CHART_W} y2={(TOP_Y + BASE_Y) / 2} style={{ stroke: 'var(--chart-grid)', strokeDasharray: '3 5' }} />
-        <line x1="0" y1={BASE_Y} x2={CHART_W} y2={BASE_Y} style={{ stroke: 'var(--chart-grid)' }} />
+        <svg
+          viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+          width="100%"
+          role="img"
+          aria-label={`Grafik kecepatan ${label.toLowerCase()} 60 detik terakhir`}
+          style={{ display: 'block' }}
+        >
+          <line x1="0" y1={TOP_Y} x2={CHART_W} y2={TOP_Y} style={{ stroke: 'var(--chart-grid)', strokeDasharray: '3 5' }} />
+          <line x1="0" y1={MID_Y} x2={CHART_W} y2={MID_Y} style={{ stroke: 'var(--chart-grid)', strokeDasharray: '3 5' }} />
+          <line x1="0" y1={BASE_Y} x2={CHART_W} y2={BASE_Y} style={{ stroke: 'var(--chart-grid)' }} />
 
-        {trace.hasLine ? (
-          <>
-            <polyline
-              data-testid={`traffic-${kind}-line`}
-              points={trace.pts}
-              fill="none"
-              style={{
-                stroke: color, strokeWidth: 1.8, strokeLinejoin: 'round', strokeLinecap: 'round',
-                filter: `drop-shadow(0 0 3px ${glow})`,
-              }}
-            />
-            {trace.fresh && (
-              <circle
-                className="traffic-pulse" cx={trace.hx} cy={trace.hy} r={9}
-                style={{ fill: 'none', stroke: color, strokeWidth: 1.5 }}
+          {trace.hasLine ? (
+            <>
+              <text data-testid={`traffic-${kind}-tick-top`} x="2" y={TOP_Y - 3} style={AXIS_TEXT}>{formatAxis(trace.scale)}</text>
+              <text data-testid={`traffic-${kind}-tick-mid`} x="2" y={MID_Y - 3} style={AXIS_TEXT}>{formatAxis(trace.scale / 2)}</text>
+              <text data-testid={`traffic-${kind}-tick-base`} x="2" y={BASE_Y + 10} style={AXIS_TEXT}>0</text>
+              <polyline
+                data-testid={`traffic-${kind}-line`}
+                points={trace.pts}
+                fill="none"
+                style={{
+                  stroke: color, strokeWidth: 1.8, strokeLinejoin: 'round', strokeLinecap: 'round',
+                  filter: `drop-shadow(0 0 3px ${glow})`,
+                }}
               />
-            )}
-            <circle cx={trace.hx} cy={trace.hy} r={3.5} style={{ fill: color, opacity: trace.fresh ? 1 : 0.5 }} />
-          </>
-        ) : (
-          <text
-            x={CHART_W / 2} y={CHART_H / 2} textAnchor="middle"
-            style={{ fontSize: 11, fill: 'var(--text-2)' }}
+              {trace.fresh && (
+                <circle
+                  className="traffic-pulse" cx={trace.hx} cy={trace.hy} r={9}
+                  style={{ fill: 'none', stroke: color, strokeWidth: 1.5 }}
+                />
+              )}
+              <circle cx={trace.hx} cy={trace.hy} r={3.5} style={{ fill: color, opacity: trace.fresh ? 1 : 0.5 }} />
+              {probe && (
+                <>
+                  <line
+                    data-testid={`traffic-${kind}-crosshair`}
+                    x1={probe.x} y1={TOP_Y} x2={probe.x} y2={BASE_Y}
+                    style={{ stroke: 'var(--text-2)', strokeWidth: 1, strokeDasharray: '2 3' }}
+                  />
+                  <circle
+                    data-testid={`traffic-${kind}-probe`} cx={probe.x} cy={probe.y} r={4.5}
+                    style={{ fill: color, stroke: 'var(--surface)', strokeWidth: 2 }}
+                  />
+                </>
+              )}
+            </>
+          ) : (
+            <text
+              x={CHART_W / 2} y={CHART_H / 2} textAnchor="middle"
+              style={{ fontSize: 11, fill: 'var(--text-2)' }}
+            >
+              {emptyLabel}
+            </text>
+          )}
+        </svg>
+
+        {probe && (
+          <div
+            role="tooltip"
+            data-testid={`traffic-${kind}-tip`}
+            style={{
+              position: 'absolute', pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 2,
+              left: `${(probe.x / CHART_W) * 100}%`, top: `${(probe.y / CHART_H) * 100}%`,
+              transform: `translate(-${Math.round(anchor * 100)}%, ${tipBelow ? '10px' : 'calc(-100% - 10px)'})`,
+              background: 'var(--chart-tip-bg)', color: 'var(--chart-tip-fg)',
+              borderRadius: 8, padding: '5px 9px', boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+            }}
           >
-            {emptyLabel}
-          </text>
+            <div style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.3 }}>{formatBps(probe.v)}</div>
+            <div style={{ fontSize: 10.5, lineHeight: 1.3, opacity: 0.8 }}>
+              {probe.ageSec === 0 ? 'sekarang' : `${probe.ageSec} dtk lalu`}
+            </div>
+          </div>
         )}
-      </svg>
+      </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8, fontSize: 11, color: 'var(--text-2)' }}>
         <span>Puncak {formatBps(trace.peak)}</span>
@@ -165,7 +235,7 @@ export function TrafficPair({
         <TrafficCard kind="up" samples={samples} now={now} intervalMs={intervalMs} emptyLabel={emptyLabel} />
       </div>
       <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-2)', textAlign: 'center' }}>
-        60 detik terakhir · diperbarui tiap {intervalMs / 1000} detik · skala otomatis
+        60 detik terakhir · diperbarui tiap {intervalMs / 1000} detik · tunjuk atau sentuh grafik untuk melihat nilainya
       </p>
     </div>
   );

@@ -19,6 +19,38 @@ export const TOP_Y = 12; // batas atas grafik
 export const PLOT_W = CHART_W - 14;
 
 const MIN_SCALE_BPS = 100_000; // skala minimum 100 Kbps supaya lalu lintas sepi tidak tampak "meledak"
+const SCALE_HEADROOM = 1.08; // ruang kecil di atas puncak data agar garis tidak menempel di batas atas
+
+/** Garis tengah grafik (setengah skala). */
+export const MID_Y = (TOP_Y + BASE_Y) / 2;
+
+/** Posisi vertikal (koordinat SVG) untuk kecepatan `v` pada skala `scale`. */
+export function yFor(v: number, scale: number): number {
+  return BASE_Y - (v / scale) * (BASE_Y - TOP_Y);
+}
+
+/**
+ * Pembulatan ke atas ke angka yang enak dibaca (1, 2, 4, 5, 8 × 10^n). Dipakai sebagai nilai
+ * garis batas teratas, sehingga garis skala selalu bernilai bulat (mis. 10 / 5 / 0 Mbps).
+ */
+export function niceCeil(x: number): number {
+  if (!(x > 0)) return MIN_SCALE_BPS;
+  const p = Math.pow(10, Math.floor(Math.log10(x)));
+  for (const m of [1, 2, 4, 5, 8, 10]) {
+    if (m * p >= x * (1 - 1e-9)) return m * p;
+  }
+  return 10 * p;
+}
+
+/**
+ * Memilih skala grafik. Naik seketika bila data melampauinya, tetapi baru turun bila data sudah
+ * kurang dari separuhnya — supaya garis skala tidak berkedip-kedip tiap kali polling.
+ */
+export function pickScale(prev: number | null, max: number): number {
+  const need = Math.max(MIN_SCALE_BPS, niceCeil(max * SCALE_HEADROOM));
+  if (prev === null || need > prev || need < prev * 0.5) return need;
+  return prev;
+}
 
 export interface TracePoint {
   /** waktu sampel diterima (epoch ms) */
@@ -78,6 +110,8 @@ export interface Trace {
   /** puncak dan rata-rata sampel dalam jendela */
   peak: number;
   avg: number;
+  /** skala yang dipakai (bit/detik di garis batas teratas); garis tengah = setengahnya */
+  scale: number;
 }
 
 const EMPTY: Trace = {
@@ -89,6 +123,7 @@ const EMPTY: Trace = {
   latest: null,
   peak: 0,
   avg: 0,
+  scale: MIN_SCALE_BPS,
 };
 
 /**
@@ -99,7 +134,12 @@ const EMPTY: Trace = {
  * diinterpolasi di antara dua sampel — hasilnya bergerak mulus walau datanya jarang.
  * Sampel terbaru tetap dipakai untuk angka besar, puncak, dan rata-rata.
  */
-export function buildTrace(samples: TracePoint[], now: number, intervalMs: number): Trace {
+export function buildTrace(
+  samples: TracePoint[],
+  now: number,
+  intervalMs: number,
+  prevScale: number | null = null,
+): Trace {
   if (samples.length === 0) return EMPTY;
 
   const last = samples[samples.length - 1];
@@ -118,7 +158,7 @@ export function buildTrace(samples: TracePoint[], now: number, intervalMs: numbe
   }
   const avg = n > 0 ? sum / n : 0;
   const fresh = now - last.t <= intervalMs * 3;
-  const base: Trace = { ...EMPTY, latest: last.v, peak, avg, fresh };
+  const base: Trace = { ...EMPTY, latest: last.v, peak, avg, fresh, scale: prevScale ?? MIN_SCALE_BPS };
 
   // Sampel terakhir yang waktunya sudah dilewati ujung (tertunda) garis.
   let iHead = -1;
@@ -147,8 +187,8 @@ export function buildTrace(samples: TracePoint[], now: number, intervalMs: numbe
 
   let max = vHead;
   for (let i = iFirst; i <= iHead; i++) if (samples[i].v > max) max = samples[i].v;
-  const scale = Math.max(MIN_SCALE_BPS, max * 1.15);
-  const yOf = (v: number) => BASE_Y - (v / scale) * (BASE_Y - TOP_Y);
+  const scale = pickScale(prevScale, max);
+  const yOf = (v: number) => yFor(v, scale);
 
   const pts: string[] = [];
   for (let i = iFirst; i <= iHead; i++) {
@@ -157,7 +197,60 @@ export function buildTrace(samples: TracePoint[], now: number, intervalMs: numbe
   }
   pts.push(`${PLOT_W},${yOf(vHead).toFixed(1)}`);
 
-  return { ...base, hasLine: true, pts: pts.join(' '), hx: PLOT_W, hy: yOf(vHead) };
+  return { ...base, hasLine: true, pts: pts.join(' '), hx: PLOT_W, hy: yOf(vHead), scale };
+}
+
+export interface Probe {
+  /** posisi titik di grafik (koordinat SVG) */
+  x: number;
+  y: number;
+  /** kecepatan di titik itu (bit/detik) */
+  v: number;
+  /** berapa detik sebelum tepi kanan grafik ("sekarang") */
+  ageSec: number;
+}
+
+/**
+ * Nilai garis pada posisi horizontal `x` (koordinat SVG) — untuk info saat kursor diarahkan.
+ * Memakai interpolasi yang sama dengan `buildTrace`, jadi titik yang ditunjuk selalu tepat
+ * berada di garis yang tergambar. Null bila di posisi itu belum ada data.
+ */
+export function probeAt(
+  samples: TracePoint[],
+  now: number,
+  intervalMs: number,
+  x: number,
+  scale: number,
+): Probe | null {
+  if (samples.length === 0) return null;
+  const px = Math.min(PLOT_W, Math.max(0, x));
+  const tau = now - intervalMs - ((PLOT_W - px) / PLOT_W) * WINDOW_MS;
+  if (tau < samples[0].t) return null;
+
+  let v = samples[samples.length - 1].v;
+  for (let i = samples.length - 1; i >= 0; i--) {
+    if (samples[i].t <= tau) {
+      const a = samples[i];
+      const b = samples[i + 1];
+      v = b ? a.v + (b.v - a.v) * ((tau - a.t) / (b.t - a.t)) : a.v;
+      break;
+    }
+  }
+  return {
+    x: px,
+    y: yFor(v, scale),
+    v,
+    ageSec: Math.round(((PLOT_W - px) / PLOT_W) * (WINDOW_MS / 1000)),
+  };
+}
+
+/** Angka di garis skala: bulat dan ringkas ("10 Mbps", "2.5 Mbps", "500 Kbps", "0"). */
+export function formatAxis(bps: number): string {
+  if (bps <= 0) return '0';
+  if (bps >= 1e9) return `${+(bps / 1e9).toFixed(2)} Gbps`;
+  if (bps >= 1e6) return `${+(bps / 1e6).toFixed(2)} Mbps`;
+  if (bps >= 1e3) return `${+(bps / 1e3).toFixed(1)} Kbps`;
+  return `${Math.round(bps)} bps`;
 }
 
 /** Angka dan satuannya dipisah supaya bisa ditampilkan dengan ukuran huruf berbeda. */

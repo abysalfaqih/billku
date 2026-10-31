@@ -29,6 +29,8 @@
   --chart-up:         #7C3AED;
   --chart-up-glow:    rgba(124,58,237,0.35);
   --chart-grid:       rgba(0,0,0,0.10);
+  --chart-tip-bg:     #111827;
+  --chart-tip-fg:     #F9FAFB;
 }
 
 html.dark {
@@ -57,6 +59,8 @@ html.dark {
   --chart-up:         #A78BFA;
   --chart-up-glow:    rgba(167,139,250,0.55);
   --chart-grid:       rgba(255,255,255,0.10);
+  --chart-tip-bg:     #F0F4FF;
+  --chart-tip-fg:     #0C0E14;
 }
 
 
