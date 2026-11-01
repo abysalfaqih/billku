@@ -2,6 +2,7 @@ import { Suspense, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, MessageCircle, Trash2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { WhatsappForm } from './components/whatsapp-form';
@@ -100,7 +101,7 @@ function ConfigCard({ config, onDelete }: { config: WhatsappConfig; onDelete: ()
 }
 
 function WhatsappPageContent() {
-  const { data: configs, isLoading } = useWhatsappConfigs();
+  const { data: configs, isLoading, isError, refetch } = useWhatsappConfigs();
   const deleteConfig = useDeleteWhatsappConfig();
   const [formOpen, setFormOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WhatsappConfig | null>(null);
@@ -154,6 +155,8 @@ function WhatsappPageContent() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !configs ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !configs?.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

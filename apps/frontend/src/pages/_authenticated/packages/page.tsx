@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, Edit2, Trash2, Package as PkgIcon, Network, AlertTriangle } from 'lucide-react';
 import { useIpPools } from '@/hooks/useIpPools';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
@@ -83,7 +84,7 @@ function PackageRow({
 }
 
 export default function PackagesPage() {
-  const { data: packages, isLoading } = usePackages();
+  const { data: packages, isLoading, isError, refetch } = usePackages();
   const { data: ipPools } = useIpPools();
   const deletePackage = useDeletePackage();
   const [formOpen, setFormOpen] = useState(false);
@@ -114,6 +115,8 @@ export default function PackagesPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !packages ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !packages?.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

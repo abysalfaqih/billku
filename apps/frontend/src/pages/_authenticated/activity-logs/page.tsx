@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ClipboardList, ChevronRight } from 'lucide-react';
 import { Pagination } from '@/components/ui/pagination';
+import { QueryError } from '@/components/ui/query-error';
 import { Spinner } from '@/components/ui/spinner';
 import { Drawer } from '@/components/ui/drawer';
 import { useActivityLogs } from '@/hooks/useActivityLogs';
@@ -40,7 +41,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 export default function ActivityLogsPage() {
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
-  const { data, isLoading } = useActivityLogs({ page, limit: 50 });
+  const { data, isLoading, isError, refetch } = useActivityLogs({ page, limit: 50 });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -61,6 +62,8 @@ export default function ActivityLogsPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !data ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !data?.data.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

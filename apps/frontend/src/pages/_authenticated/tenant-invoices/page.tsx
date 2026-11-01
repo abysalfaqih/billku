@@ -4,6 +4,7 @@ import { Plus, FileText, Download, CheckCircle2, Pencil, Trash2, X } from 'lucid
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
+import { QueryError } from '@/components/ui/query-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -568,7 +569,7 @@ export default function TenantInvoicesPage() {
   const [deleteTarget, setDeleteTarget] = useState<TenantInvoiceRow | null>(null);
   const qc = useQueryClient();
 
-  const { data: invoices, isLoading } = useQuery<TenantInvoiceRow[]>({
+  const { data: invoices, isLoading, isError, refetch } = useQuery<TenantInvoiceRow[]>({
     queryKey: ['tenant-invoices'],
     queryFn: () => api.get('/tenant-invoices').then(r => r.data),
   });
@@ -619,6 +620,8 @@ export default function TenantInvoicesPage() {
 
         {isLoading ? (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}><Spinner size="lg" /></div>
+        ) : isError && !invoices ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !invoices?.length ? (
           <div style={{ textAlign: 'center', padding: '60px 24px', background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)' }}>
             <FileText size={32} style={{ color: 'var(--text-3)', margin: '0 auto 12px' }} />

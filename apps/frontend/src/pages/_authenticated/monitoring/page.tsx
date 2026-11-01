@@ -35,17 +35,25 @@ function SearchPanel({ onSelect }: { onSelect: (c: SearchResult) => void }) {
   const [query, setQuery]   = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed]   = useState(false);
 
   useEffect(() => {
+    setFailed(false);
     if (query.length < 2) { setResults([]); return; }
+    let stale = false; // abaikan jawaban lama bila pengguna sudah mengetik lagi
     const t = setTimeout(async () => {
       setLoading(true);
       try {
         const { data } = await api.get('/monitoring/search', { params: { q: query } });
-        setResults(data);
-      } finally { setLoading(false); }
+        if (!stale) setResults(data);
+      } catch {
+        // Tanpa ini kegagalan jaringan tampil sebagai "Pelanggan tidak ditemukan".
+        if (!stale) { setResults([]); setFailed(true); }
+      } finally {
+        if (!stale) setLoading(false);
+      }
     }, 300);
-    return () => clearTimeout(t);
+    return () => { stale = true; clearTimeout(t); };
   }, [query]);
 
   return (
@@ -109,11 +117,16 @@ function SearchPanel({ onSelect }: { onSelect: (c: SearchResult) => void }) {
       )}
 
       {query.length >= 2 && !loading && results.length === 0 && (
-        <div style={{
-          marginTop: 8, padding: 20, textAlign: 'center', background: 'var(--surface)',
-          borderRadius: 12, border: '1px solid var(--border)',
-        }}>
-          <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Pelanggan tidak ditemukan</p>
+        <div
+          role={failed ? 'alert' : undefined}
+          style={{
+            marginTop: 8, padding: 20, textAlign: 'center', background: 'var(--surface)',
+            borderRadius: 12, border: '1px solid var(--border)',
+          }}
+        >
+          <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
+            {failed ? 'Gagal mencari pelanggan. Periksa koneksi Anda, lalu ketik ulang.' : 'Pelanggan tidak ditemukan'}
+          </p>
         </div>
       )}
 

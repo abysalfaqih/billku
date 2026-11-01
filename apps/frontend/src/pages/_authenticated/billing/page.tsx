@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, XCircle, CheckCircle2, FileText, FileDown, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Badge } from '@/components/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -45,7 +46,7 @@ export default function BillingPage() {
   const [cancelTarget, setCancelTarget] = useState<Bill | null>(null);
   const exportBilling = useExportCsv('/billing/export', `tagihan-${new Date().toISOString().split('T')[0]}.csv`);
 
-  const { data, isLoading } = useBills({ page, limit: 20, status: status || undefined, search: search || undefined });
+  const { data, isLoading, isError, refetch } = useBills({ page, limit: 20, status: status || undefined, search: search || undefined });
   const cancelBill = useCancelBill();
 
   // Halaman ini tidak remount kalau ?search= berubah saat sudah di /billing
@@ -129,6 +130,8 @@ export default function BillingPage() {
             <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
               <Spinner size="lg" />
             </div>
+          ) : isError && !data ? (
+            <QueryError onRetry={() => refetch()} />
           ) : !data?.data.length ? (
             <div style={{
               textAlign: 'center', padding: '60px 24px', marginTop: 8,

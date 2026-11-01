@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Network, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { IpPoolForm } from './components/ip-pool-form';
@@ -9,7 +10,7 @@ import { useMikrotikConfigs } from '@/hooks/useMikrotik';
 import type { IpPool } from '@/types';
 
 export default function IpPoolsPage() {
-  const { data: pools, isLoading } = useIpPools();
+  const { data: pools, isLoading, isError, refetch } = useIpPools();
   const { data: mikrotikConfigs } = useMikrotikConfigs();
   const deletePool = useDeleteIpPool();
   const [formOpen, setFormOpen] = useState(false);
@@ -31,6 +32,8 @@ export default function IpPoolsPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !pools ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !pools?.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

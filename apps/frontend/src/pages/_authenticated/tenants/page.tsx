@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Building2, Power, UserCog, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
 import { TenantForm } from './components/tenant-form';
@@ -10,7 +11,7 @@ import { useTenants, useToggleTenantActive } from '@/hooks/useTenants';
 import type { Tenant } from '@/types';
 
 export default function TenantsPage() {
-  const { data: tenants, isLoading } = useTenants();
+  const { data: tenants, isLoading, isError, refetch } = useTenants();
   const toggleActive = useToggleTenantActive();
   const [formOpen, setFormOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
@@ -39,6 +40,8 @@ export default function TenantsPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !tenants ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !tenants?.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, FileText, Users, Calendar } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
+import { QueryError } from '@/components/ui/query-error';
 import { useRevenueReport, useBillsReport, useCustomersReport } from '@/hooks/useReports';
 import api from '@/lib/api';
 import { AgingReportSection } from './aging-report';
@@ -117,12 +118,19 @@ export default function ReportsPage() {
   const [endDate, setEndDate] = useState(todayStr());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  const { data: revenue, isLoading: loadingRevenue } = useRevenueReport(startDate, endDate);
-  const { data: bills, isLoading: loadingBills } = useBillsReport();
-  const { data: customers, isLoading: loadingCustomers } = useCustomersReport();
+  const { data: revenue, isLoading: loadingRevenue, isError: errRevenue, refetch: refetchRevenue } = useRevenueReport(startDate, endDate);
+  const { data: bills, isLoading: loadingBills, isError: errBills, refetch: refetchBills } = useBillsReport();
+  const { data: customers, isLoading: loadingCustomers, isError: errCustomers, refetch: refetchCustomers } = useCustomersReport();
   const { data: monthly, isLoading: loadingMonthly } = useMonthlyReport(selectedYear);
 
   const isLoading = loadingRevenue || loadingBills || loadingCustomers;
+  // Gagal hanya bila ada bagian yang gagal DAN belum punya data lama untuk ditampilkan.
+  const failed = (errRevenue && !revenue) || (errBills && !bills) || (errCustomers && !customers);
+  const retryFailed = () => {
+    if (errRevenue && !revenue) refetchRevenue();
+    if (errBills && !bills) refetchBills();
+    if (errCustomers && !customers) refetchCustomers();
+  };
 
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
@@ -164,6 +172,8 @@ export default function ReportsPage() {
         <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
           <Spinner size="lg" />
         </div>
+      ) : failed ? (
+        <QueryError onRetry={retryFailed} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 

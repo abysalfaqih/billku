@@ -9,7 +9,7 @@
   --border-strong:    rgba(0,0,0,0.16);
   --text-1:           #111827;
   --text-2:           #4B5563;
-  --text-3:           #9CA3AF;
+  --text-3:           #656E7C;
   --sidebar-bg:       #FFFFFF;
   --sidebar-border:   rgba(0,0,0,0.08);
   --sidebar-w:        220px;
@@ -41,7 +41,7 @@ html.dark {
   --border-strong:    rgba(255,255,255,0.14);
   --text-1:           #F0F4FF;
   --text-2:           #94A3B8;
-  --text-3:           #4B5563;
+  --text-3:           #8391A7;
   --sidebar-bg:       #111318;
   --sidebar-border:   rgba(255,255,255,0.05);
   --nav-hover:        rgba(255,255,255,0.05);

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CreditCard, Download } from 'lucide-react';
 import { Pagination } from '@/components/ui/pagination';
+import { QueryError } from '@/components/ui/query-error';
 import { SearchInput } from '@/components/ui/search-input';
 import { Spinner } from '@/components/ui/spinner';
 import { usePayments } from '@/hooks/usePayments';
@@ -36,7 +37,7 @@ export default function PaymentsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(urlSearch);
   const [searchInput, setSearchInput] = useState(urlSearch);
-  const { data, isLoading } = usePayments({ page, limit: 20, search: search || undefined });
+  const { data, isLoading, isError, refetch } = usePayments({ page, limit: 20, search: search || undefined });
 
   // Halaman ini tidak remount kalau ?search= berubah saat sudah di /payments
   useEffect(() => {
@@ -91,6 +92,8 @@ export default function PaymentsPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !data ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !data?.data.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px', marginTop: 8,

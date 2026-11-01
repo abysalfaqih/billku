@@ -2,6 +2,7 @@ import { Suspense, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, UserCog, Power, Edit2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -16,7 +17,7 @@ function UsersContent() {
   const [params] = useSearchParams();
   const tenantId = params.get('tenantId') ?? undefined;
   const { user: currentUser } = useAuthStore();
-  const { data: users, isLoading } = useUsers(tenantId);
+  const { data: users, isLoading, isError, refetch } = useUsers(tenantId);
   const toggleActive = useToggleUserActive(tenantId);
   const deleteUser = useDeleteUser(tenantId);
   const [formOpen, setFormOpen] = useState(false);
@@ -44,6 +45,8 @@ function UsersContent() {
         <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
           <Spinner size="lg" />
         </div>
+      ) : isError && !users ? (
+        <QueryError onRetry={() => refetch()} />
       ) : !users?.length ? (
         <div style={{
           textAlign: 'center', padding: '60px 24px',

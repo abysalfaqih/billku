@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Spinner } from '@/components/ui/spinner';
+import { QueryError } from '@/components/ui/query-error';
 import api from '@/lib/api';
 import {
   Users, FileText, TrendingUp,
@@ -130,7 +131,7 @@ function RevenueCard({ total, count }: { total: number; count: number }) {
 }
 
 export default function DashboardPage() {
-  const { data, isLoading } = useDashboard();
+  const { data, isLoading, isError, refetch } = useDashboard();
 
   const bySt = (list: any[], st: string) =>
     list?.find((s: any) => s.status === st) ?? { count: 0, total: '0' };
@@ -155,6 +156,9 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
           <Spinner size="lg" />
         </div>
+      ) : isError && !data ? (
+        // Tanpa ini semua angka tampil 0 seolah-olah nyata padahal datanya gagal diambil.
+        <QueryError onRetry={() => refetch()} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 

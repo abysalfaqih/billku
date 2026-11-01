@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Layers, Edit2, Trash2, RefreshCw, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
@@ -92,7 +93,7 @@ function PlanCard({
 }
 
 export default function SubscriptionsPage() {
-  const { data: rows, isLoading } = useTenantSubscriptions();
+  const { data: rows, isLoading, isError, refetch } = useTenantSubscriptions();
   const { data: plans } = useSubscriptionPlans();
   const deletePlan = useDeletePlan();
 
@@ -165,6 +166,8 @@ export default function SubscriptionsPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !rows ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !rows?.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

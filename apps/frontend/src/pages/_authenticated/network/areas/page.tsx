@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, MapPin, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Input } from '@/components/ui/input';
 import { Dialog } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -9,7 +10,7 @@ import { useAreas, useCreateArea, useDeleteArea } from '@/hooks/useAreas';
 import type { Area } from '@/types';
 
 export default function AreasPage() {
-  const { data: areas, isLoading } = useAreas();
+  const { data: areas, isLoading, isError, refetch } = useAreas();
   const create = useCreateArea(() => setFormOpen(false));
   const deleteArea = useDeleteArea();
   const [formOpen, setFormOpen] = useState(false);
@@ -32,6 +33,8 @@ export default function AreasPage() {
 
         {isLoading ? (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}><Spinner size="lg" /></div>
+        ) : isError && !areas ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !areas?.length ? (
           <div style={{ textAlign: 'center', padding: '60px 24px', background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)' }}>
             <MapPin size={32} style={{ color: 'var(--text-3)', margin: '0 auto 12px' }} />

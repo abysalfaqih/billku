@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Router, Trash2, Edit2, Zap, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { MikrotikForm } from './components/mikrotik-form';
@@ -81,7 +82,7 @@ function MikrotikCard({
 }
 
 export default function MikrotikPage() {
-  const { data: configs, isLoading } = useMikrotikConfigs();
+  const { data: configs, isLoading, isError, refetch } = useMikrotikConfigs();
   const deleteMikrotik = useDeleteMikrotik();
   const [formOpen, setFormOpen] = useState(false);
   const [selected, setSelected] = useState<MikrotikConfig | null>(null);
@@ -103,6 +104,8 @@ export default function MikrotikPage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
             <Spinner size="lg" />
           </div>
+        ) : isError && !configs ? (
+          <QueryError onRetry={() => refetch()} />
         ) : !configs?.length ? (
           <div style={{
             textAlign: 'center', padding: '60px 24px',

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, MoreVertical, Edit2, Trash2, Wifi, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Badge } from '@/components/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -221,7 +222,7 @@ export default function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
 
-  const { data, isLoading } = useCustomers({
+  const { data, isLoading, isError, refetch } = useCustomers({
     page, limit: 20, search, status: status || undefined,
     areaId: areaId ? Number(areaId) : undefined,
   });
@@ -337,6 +338,8 @@ export default function CustomersPage() {
             <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
               <Spinner size="lg" />
             </div>
+          ) : isError && !data ? (
+            <QueryError onRetry={() => refetch()} />
           ) : !data?.data.length ? (
             <EmptyState search={search} />
           ) : (
