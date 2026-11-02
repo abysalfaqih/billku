@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { MonitoringService } from './monitoring.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('monitoring')
@@ -28,6 +29,16 @@ export class MonitoringController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.getSessionTraffic(id, user);
+  }
+
+  @Post('customers/:id/sync')
+  @Roles('super_admin', 'admin')
+  @HttpCode(HttpStatus.OK)
+  syncHotspot(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.syncHotspot(id, user);
   }
 
   @Post('customers/:id/kick')

@@ -5,7 +5,7 @@ import { formatBytes, formatUptime } from './format';
 
 interface Field {
   label: string;
-  value: string | undefined;
+  value: string | null | undefined;
   Icon: LucideIcon;
 }
 
@@ -15,6 +15,8 @@ export function SessionInfoCard({ data, isHotspot }: { data: SessionResponse; is
   if (!s) return null;
 
   const uptime = formatUptime(s.uptime);
+  // voucher yang dipakai di beberapa perangkat sekaligus: sesi pertama di kisi, sisanya di daftar bawah
+  const others = (data.sessions ?? []).slice(1);
 
   const fields: Field[] = isHotspot
     ? [
@@ -65,7 +67,7 @@ export function SessionInfoCard({ data, isHotspot }: { data: SessionResponse; is
           }}
         >
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} />
-          Online
+          {others.length > 0 ? `Online · ${others.length + 1} perangkat` : 'Online'}
         </span>
       </div>
 
@@ -101,6 +103,28 @@ export function SessionInfoCard({ data, isHotspot }: { data: SessionResponse; is
           </div>
         ))}
       </dl>
+
+      {others.length > 0 && (
+        <div style={{ padding: '0 14px 14px' }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            Perangkat lain ({others.length})
+          </p>
+          <ul data-testid="other-sessions" style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {others.map((o, i) => (
+              <li
+                key={`${o.macAddress ?? ''}-${o.address}-${i}`}
+                style={{
+                  padding: '8px 12px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)',
+                  fontSize: 12.5, color: 'var(--text-1)', overflowWrap: 'anywhere',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                }}
+              >
+                {o.address} · {o.macAddress || '—'} · {formatUptime(o.uptime) || '—'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }

@@ -1,7 +1,9 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Power } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { SESSION_TIMEOUT_MS } from '@/hooks/useMonitoring';
 import { TrafficPair } from '../components/traffic-card';
 import { appendSample, toSample } from '../components/traffic-trace';
 import type { TrafficSample } from '../components/traffic-trace';
@@ -14,7 +16,6 @@ interface SessionResponse {
   customerName: string;
   reason?: string;
   username?: string;
-  mikrotikId?: number;
   session?: { address: string; uptime: string };
   traffic?: { rxBps: number; txBps: number } | null;
 }
@@ -31,27 +32,44 @@ function LiveSessionContent() {
   useEffect(() => {
     if (!customerId) return;
 
+    let stopped = false;
+    let inFlight = false; // jangan menumpuk permintaan bila router/server sedang lambat
+
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
-        const { data: res } = await api.get(`/monitoring/customers/${customerId}/session`);
+        const { data: res } = await api.get(`/monitoring/customers/${customerId}/session`, { timeout: SESSION_TIMEOUT_MS });
+        if (stopped) return;
         setData(res);
         if (res.connected && res.traffic) {
           const sample = toSample(Date.now(), res.traffic.rxBps, res.traffic.txBps);
           setHistory((prev) => appendSample(prev, sample, LIVE_POLL_MS));
         }
       } catch {
-        setData({ connected: false, customerName: '-', reason: 'Gagal mengambil data' });
+        if (!stopped) setData({ connected: false, customerName: '-', reason: 'Gagal mengambil data' });
+      } finally {
+        inFlight = false;
       }
     };
 
-    poll();
+    void poll();
     intervalRef.current = setInterval(poll, LIVE_POLL_MS);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      stopped = true;
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [customerId]);
 
   const handleKick = async () => {
-    if (!data?.mikrotikId || !data.username) return;
-    await api.post('/monitoring/sessions/kick', { mikrotikId: data.mikrotikId, username: data.username });
+    if (!customerId) return;
+    try {
+      const { data: res } = await api.post(`/monitoring/customers/${customerId}/kick`, undefined, { timeout: 35_000 });
+      if (res.success) toast.success(res.message ?? 'Sesi berhasil diputus');
+      else toast.error(res.reason ?? 'Gagal memutus sesi');
+    } catch {
+      toast.error('Gagal memutus sesi');
+    }
   };
 
   return (

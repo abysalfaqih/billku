@@ -8,14 +8,34 @@ export interface MikrotikConnection {
   password: string;
 }
 
-export interface ActiveSession {
-  id: string;
-  name: string;
-  service: string;
-  callerId: string;
+export interface HotspotActiveSession {
   address: string;
   uptime: string;
+  macAddress: string;
+  bytesIn: string;
+  bytesOut: string;
 }
+
+/** Hasil pengecekan satu pelanggan hotspot: sesi yang aktif + keadaan akun voucher-nya di router. */
+export interface HotspotInspection {
+  /** semua sesi aktif user ini (bisa lebih dari satu bila dipakai di beberapa perangkat) */
+  sessions: HotspotActiveSession[];
+  /** akun di router; null = akun TIDAK ADA di router ini */
+  account: { disabled: boolean; profile: string } | null;
+}
+
+export interface PppoeInspection {
+  /** null = tidak sedang online */
+  session: { address: string; uptime: string; callerId: string } | null;
+  traffic: { rxBps: number; txBps: number } | null;
+}
+
+/** Batas keras untuk menyambung + login ke router; lewat dari ini dianggap tidak terjangkau. */
+export const CONNECT_DEADLINE_MS = 10_000;
+/** Batas total satu pengecekan Monitoring (sambung + semua perintah). */
+export const MONITOR_DEADLINE_MS = 8_000;
+/** Batas total operasi lain (membuat/mengubah/memutus user, dst.) — jaring pengaman bila router berhenti menjawab di tengah. */
+export const OPERATION_DEADLINE_MS = 30_000;
 
 // Dilempar method "Strict" kalau router tidak bisa dihubungi / login gagal.
 // Dipisah dari error perintah supaya pemanggil (IsolirScheduler) bisa langsung
@@ -28,6 +48,42 @@ export class MikrotikUnreachableError extends Error {
   }
 }
 
+/** Router tidak menyelesaikan pekerjaannya dalam batas waktu keras. */
+export class MikrotikTimeoutError extends Error {
+  constructor(host: string, ms: number) {
+    super(`router ${host} tidak membalas dalam ${Math.round(ms / 1000)} detik`);
+    this.name = 'MikrotikTimeoutError';
+  }
+}
+
+export type MikrotikErrorKind = 'timeout' | 'refused' | 'unreachable' | 'auth' | 'other';
+
+/**
+ * Mengubah galat koneksi/perintah router menjadi jenis + kalimat yang bisa dibaca admin.
+ * Dipakai Monitoring supaya "router mati/lambat" tidak tampak seperti "pelanggan offline".
+ */
+export function describeMikrotikError(err: unknown): { kind: MikrotikErrorKind; message: string } {
+  const e = err as { errno?: string | number; code?: string; message?: string } | null | undefined;
+  const text = String(e?.message ?? err ?? '');
+  const code = String(e?.code ?? e?.errno ?? '');
+  const inner = err instanceof MikrotikUnreachableError ? text : '';
+
+  if (err instanceof MikrotikTimeoutError || code === 'SOCKTMOUT' || code === 'ETIMEDOUT'
+      || /timed? ?out|tidak membalas/i.test(text)) {
+    return { kind: 'timeout', message: 'Router tidak membalas (waktu habis). Pastikan router menyala dan bisa dijangkau dari server.' };
+  }
+  if (code === 'CANTLOGIN' || /cannot log in|invalid user name or password/i.test(text)) {
+    return { kind: 'auth', message: 'Login ke router ditolak. Periksa username dan password API di menu Mikrotik.' };
+  }
+  if (code === 'ECONNREFUSED' || code === '-111' || /ECONNREFUSED/.test(text)) {
+    return { kind: 'refused', message: 'Router menolak koneksi API. Pastikan layanan API aktif dan port-nya benar.' };
+  }
+  if (/EHOSTUNREACH|ENETUNREACH|ENOTFOUND|ECONNRESET|EPIPE|socket hang up|closed/i.test(`${code} ${text} ${inner}`)) {
+    return { kind: 'unreachable', message: 'Router tidak dapat dijangkau dari server (koneksi terputus).' };
+  }
+  return { kind: 'other', message: `Gagal menghubungi router: ${text || 'galat tidak dikenal'}` };
+}
+
 // Mikrotik membalas "!empty" / UNKNOWNREPLY untuk "tidak ada data" — itu bukan error.
 function isEmptyReply(err: unknown): boolean {
   const e = err as { errno?: string; message?: string } | null | undefined;
@@ -38,52 +94,124 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Memutus soket secara paksa — api.close() tidak berbuat apa-apa selama koneksi belum selesai. */
+function destroyApi(api: RouterOSAPI): void {
+  try { api.connector?.destroy(); } catch { /* ignore */ }
+  try { void Promise.resolve(api.close()).catch(() => undefined); } catch { /* ignore */ }
+}
+
 @Injectable()
 export class MikrotikService {
   private readonly logger = new Logger(MikrotikService.name);
+
+  /** Batas total operasi non-Monitoring; instance field agar bisa dipercepat saat diuji. */
+  operationDeadlineMs = OPERATION_DEADLINE_MS;
+
+  /** Satu-satunya tempat objek koneksi dibuat. */
+  private createApi(config: MikrotikConnection): RouterOSAPI {
+    const api = new RouterOSAPI({
+      host: config.host,
+      port: config.port,
+      user: config.username,
+      password: config.password,
+      timeout: 15,
+    });
+    // Library memancarkan event 'error' pada koneksi yang sudah terbentuk (mis. soket habis waktu).
+    // Tanpa listener, EventEmitter melempar error itu sebagai uncaught exception.
+    api.on('error', (err: unknown) => {
+      this.logger.debug(`Mikrotik ${config.host}: galat soket diabaikan — ${errorMessage(err)}`);
+    });
+    return api;
+  }
+
+  /**
+   * Menjalankan `work` dengan batas waktu total. Library bisa menggantung SELAMANYA — bila router
+   * menerima koneksi lalu memutusnya, atau berhenti menjawab di tengah perintah — karena promise
+   * connect()/write() tidak pernah selesai dan batas waktu soketnya tidak menyelesaikannya. Bila
+   * batas lewat, koneksi diputus paksa dan MikrotikTimeoutError dilempar.
+   */
+  private async guarded<T>(api: RouterOSAPI, host: string, ms: number, work: () => Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(new MikrotikTimeoutError(host, ms));
+      }, ms);
+    });
+    try {
+      return await Promise.race([work(), expired]);
+    } finally {
+      clearTimeout(timer);
+      // Hanya bila batas waktu yang menghentikannya: koneksi macet, jadi harus diputus paksa.
+      // Galat biasa sudah ditangani pemanggilnya (api.close() di blok finally mereka).
+      if (timedOut) destroyApi(api);
+    }
+  }
+
+  /** Menyambung + login dengan batas waktu tersendiri (lebih pendek dari batas operasi). */
+  private async connectWithDeadline(api: RouterOSAPI, host: string, ms = CONNECT_DEADLINE_MS): Promise<void> {
+    await this.guarded(api, host, ms, () => api.connect());
+  }
+
+  /**
+   * Untuk pengecekan Monitoring: sambung + SEMUA perintah dibatasi `ms` total, apa pun yang
+   * dilakukan router — pemanggil tidak pernah menunggu lebih lama dari itu.
+   */
+  private async withDeadline<T>(
+    config: MikrotikConnection,
+    ms: number,
+    callback: (api: RouterOSAPI) => Promise<T>,
+  ): Promise<T> {
+    const api = this.createApi(config);
+    try {
+      return await this.guarded(api, config.host, ms, async () => {
+        await api.connect();
+        return callback(api);
+      });
+    } finally {
+      try { void Promise.resolve(api.close()).catch(() => undefined); } catch { /* ignore */ }
+    }
+  }
 
   private async withConnection<T>(
     config: MikrotikConnection,
     callback: (api: RouterOSAPI) => Promise<T>,
   ): Promise<T> {
-    const api = new RouterOSAPI({
-      host: config.host,
-      port: config.port,
-      user: config.username,
-      password: config.password,
-      timeout: 15,
+    const api = this.createApi(config);
+    return this.guarded(api, config.host, this.operationDeadlineMs, async () => {
+      await this.connectWithDeadline(api, config.host);
+      try {
+        return await callback(api);
+      } finally {
+        api.close();
+      }
     });
-    await api.connect();
-    try {
-      return await callback(api);
-    } finally {
-      api.close();
-    }
   }
 
   // Untuk operasi yang HASILNYA harus dipastikan (isolir): gagal konek dibedakan
-  // dari gagal perintah, dan tidak ada error yang ditelan.
+  // dari gagal perintah, dan tidak ada error yang ditelan. Router yang tidak menjawab
+  // (gagal konek ATAU macet di tengah perintah) = MikrotikUnreachableError.
   private async withStrictConnection<T>(
     config: MikrotikConnection,
     callback: (api: RouterOSAPI) => Promise<T>,
   ): Promise<T> {
-    const api = new RouterOSAPI({
-      host: config.host,
-      port: config.port,
-      user: config.username,
-      password: config.password,
-      timeout: 15,
+    const api = this.createApi(config);
+    return this.guarded(api, config.host, this.operationDeadlineMs, async () => {
+      try {
+        await this.connectWithDeadline(api, config.host);
+      } catch (err) {
+        throw new MikrotikUnreachableError(config.host, err);
+      }
+      try {
+        return await callback(api);
+      } finally {
+        try { api.close(); } catch { /* ignore */ }
+      }
+    }).catch((err) => {
+      if (err instanceof MikrotikTimeoutError) throw new MikrotikUnreachableError(config.host, err);
+      throw err;
     });
-    try {
-      await api.connect();
-    } catch (err) {
-      throw new MikrotikUnreachableError(config.host, err);
-    }
-    try {
-      return await callback(api);
-    } finally {
-      try { api.close(); } catch { /* ignore */ }
-    }
   }
 
   private async withConnectionSafe<T>(
@@ -91,26 +219,22 @@ export class MikrotikService {
     callback: (api: RouterOSAPI) => Promise<T>,
     fallbackValue: T,
   ): Promise<T> {
-    const api = new RouterOSAPI({
-      host: config.host,
-      port: config.port,
-      user: config.username,
-      password: config.password,
-      timeout: 15,
-    });
-    await api.connect();
-    try {
-      return await callback(api);
-    } catch (err: any) {
-      // !empty = Mikrotik reply valid "tidak ada data" — anggap sukses
-      if (err?.errno === 'UNKNOWNREPLY' || String(err?.message).includes('!empty')) {
-        this.logger.debug(`Mikrotik !empty reply (normal): ${err.message}`);
-        return fallbackValue;
+    const api = this.createApi(config);
+    return this.guarded(api, config.host, this.operationDeadlineMs, async () => {
+      await this.connectWithDeadline(api, config.host);
+      try {
+        return await callback(api);
+      } catch (err: any) {
+        // !empty = Mikrotik reply valid "tidak ada data" — anggap sukses
+        if (err?.errno === 'UNKNOWNREPLY' || String(err?.message).includes('!empty')) {
+          this.logger.debug(`Mikrotik !empty reply (normal): ${err.message}`);
+          return fallbackValue;
+        }
+        throw err;
+      } finally {
+        try { api.close(); } catch { /* ignore */ }
       }
-      throw err;
-    } finally {
-      try { api.close(); } catch { /* ignore */ }
-    }
+    });
   }
 
   // ─── System ────────────────────────────────────────────────────────────────
@@ -315,18 +439,27 @@ export class MikrotikService {
     });
   }
 
-  async getActiveSessions(config: MikrotikConnection, username?: string): Promise<ActiveSession[]> {
-    return this.withConnection(config, async (api) => {
-      const params = username ? [`?name=${username}`] : [];
-      const result = await api.write('/ppp/active/print', params);
-      return result.map((r) => ({
-        id: r['.id'],
-        name: r.name ?? '',
-        service: r.service ?? '',
-        callerId: r['caller-id'] ?? '',
-        address: r.address ?? '',
-        uptime: r.uptime ?? '',
-      }));
+  /**
+   * Satu pengecekan PPPoE untuk Monitoring: sesi aktif + kecepatan saat ini, dalam SATU koneksi
+   * dan dibatasi MONITOR_DEADLINE_MS. Gagal/terlambat = THROW (bukan "tidak online"), supaya
+   * pemanggil bisa membedakan router bermasalah dari pelanggan yang memang sedang offline.
+   */
+  async inspectPppoe(config: MikrotikConnection, username: string): Promise<PppoeInspection> {
+    return this.withDeadline(config, MONITOR_DEADLINE_MS, async (api) => {
+      const rows = await this.printRows(api, '/ppp/active/print', [`?name=${username}`]);
+      const row = rows.find((r) => r.name === username);
+      if (!row) return { session: null, traffic: null };
+      let traffic: { rxBps: number; txBps: number } | null = null;
+      try {
+        traffic = await this.readTraffic(api, `<pppoe-${username}>`);
+      } catch (err) {
+        if (err instanceof MikrotikTimeoutError) throw err;
+        traffic = null; // kecepatan hanya pelengkap; sesinya sendiri sudah terbukti ada
+      }
+      return {
+        session: { address: row.address ?? '', uptime: row.uptime ?? '', callerId: row['caller-id'] ?? '' },
+        traffic,
+      };
     });
   }
 
@@ -335,20 +468,32 @@ export class MikrotikService {
     interfaceName: string,
   ): Promise<{ rxBps: number; txBps: number } | null> {
     try {
-      return await this.withConnection(config, async (api) => {
-        const result = await api.write('/interface/monitor-traffic', [
-          `=interface=${interfaceName}`,
-          '=once=',
-        ]);
-        const row = result?.[0];
-        if (!row) return null;
-        return {
-          rxBps: Number(row['rx-bits-per-second'] ?? 0),
-          txBps: Number(row['tx-bits-per-second'] ?? 0),
-        };
-      });
+      return await this.withDeadline(config, MONITOR_DEADLINE_MS, (api) => this.readTraffic(api, interfaceName));
     } catch {
       return null;
+    }
+  }
+
+  private async readTraffic(
+    api: RouterOSAPI,
+    interfaceName: string,
+  ): Promise<{ rxBps: number; txBps: number } | null> {
+    const result = await api.write('/interface/monitor-traffic', [`=interface=${interfaceName}`, '=once=']);
+    const row = result?.[0];
+    if (!row) return null;
+    return {
+      rxBps: Number(row['rx-bits-per-second'] ?? 0),
+      txBps: Number(row['tx-bits-per-second'] ?? 0),
+    };
+  }
+
+  /** `print` yang memperlakukan "tidak ada data" ("!empty") sebagai daftar kosong. */
+  private async printRows(api: RouterOSAPI, command: string, params: string[]): Promise<Record<string, string>[]> {
+    try {
+      return await api.write(command, params);
+    } catch (err) {
+      if (isEmptyReply(err)) return [];
+      throw err;
     }
   }
 
@@ -375,7 +520,9 @@ export class MikrotikService {
     username: string,
     password: string,
     profile: string,
+    disabled = false,
   ): Promise<void> {
+    const disabledFlag = disabled ? 'yes' : 'no';
     await this.withConnectionSafe(config, async (api) => {
       // Cek apakah user sudah ada
       let existingId: string | null = null;
@@ -395,7 +542,7 @@ export class MikrotikService {
             `=.id=${existingId}`,
             `=password=${password}`,
             `=profile=${profile}`,
-            `=disabled=no`,
+            `=disabled=${disabledFlag}`,
           ]);
         } catch (err: any) {
           if (err?.errno !== 'UNKNOWNREPLY') throw err;
@@ -408,7 +555,7 @@ export class MikrotikService {
             `=name=${username}`,
             `=password=${password}`,
             `=profile=${profile}`,
-            `=disabled=no`,
+            `=disabled=${disabledFlag}`,
           ]);
         } catch (err: any) {
           if (err?.errno !== 'UNKNOWNREPLY') throw err;
@@ -551,33 +698,27 @@ export class MikrotikService {
     }, null);
   }
 
-  async getHotspotActiveSession(
-    config: MikrotikConnection,
-    username: string,
-  ): Promise<{
-    address: string;
-    uptime: string;
-    macAddress: string;
-    bytesIn: string;
-    bytesOut: string;
-  } | null> {
-    return this.withConnectionSafe(config, async (api) => {
-      try {
-        const sessions = await api.write('/ip/hotspot/active/print', [`?user=${username}`]);
-        if (!sessions.length) return null;
-        const s = sessions[0];
-        return {
-          address:    s.address          ?? '-',
-          uptime:     s.uptime           ?? '-',
-          macAddress: s['mac-address']   ?? '-',
-          bytesIn:    s['bytes-in']      ?? '0',
-          bytesOut:   s['bytes-out']     ?? '0',
-        };
-      } catch (err: any) {
-        if (err?.errno === 'UNKNOWNREPLY') return null;
-        throw err;
-      }
-    }, null);
+  /**
+   * Satu pengecekan hotspot untuk Monitoring (satu koneksi, dibatasi MONITOR_DEADLINE_MS):
+   * sesi aktif user + keadaan akunnya di router. Membedakan "sedang tidak dipakai" dari
+   * "akun dinonaktifkan" dan "akun tidak ada di router ini". Gagal/terlambat = THROW.
+   */
+  async inspectHotspotUser(config: MikrotikConnection, username: string): Promise<HotspotInspection> {
+    return this.withDeadline(config, MONITOR_DEADLINE_MS, async (api) => {
+      const active = await this.printRows(api, '/ip/hotspot/active/print', [`?user=${username}`]);
+      const users = await this.printRows(api, '/ip/hotspot/user/print', [`?name=${username}`]);
+      const u = users[0];
+      return {
+        sessions: active.map((s) => ({
+          address: s.address ?? '-',
+          uptime: s.uptime ?? '-',
+          macAddress: s['mac-address'] ?? '-',
+          bytesIn: s['bytes-in'] ?? '0',
+          bytesOut: s['bytes-out'] ?? '0',
+        })),
+        account: u ? { disabled: u.disabled === 'true' || u.disabled === 'yes', profile: u.profile ?? '' } : null,
+      };
+    });
   }
 
   async kickHotspotSession(config: MikrotikConnection, username: string): Promise<void> {

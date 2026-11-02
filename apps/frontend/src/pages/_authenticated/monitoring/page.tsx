@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, WifiOff, Power, RefreshCw, ArrowLeft } from 'lucide-react';
-import { useCustomerSession, useKickSession } from '@/hooks/useMonitoring';
-import type { SessionResponse } from '@/hooks/useMonitoring';
+import { Search, WifiOff, Power, RefreshCw, ArrowLeft, Ban, SearchX, CloudOff, CircleHelp, DatabaseZap } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { fetchCustomerSession, useKickSession, useSyncHotspot, SEARCH_TIMEOUT_MS } from '@/hooks/useMonitoring';
+import type { SessionResponse, SessionState } from '@/hooks/useMonitoring';
 import api from '@/lib/api';
 import { SessionInfoCard } from './components/session-info-card';
 import { TrafficPanel } from './components/traffic-card';
+import { INITIAL_VIEW, SESSION_POLL_MS, applyResult, lookOf, requestFailed } from './components/session-state';
+import type { ViewState } from './components/session-state';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SearchResult {
@@ -44,7 +47,7 @@ function SearchPanel({ onSelect }: { onSelect: (c: SearchResult) => void }) {
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const { data } = await api.get('/monitoring/search', { params: { q: query } });
+        const { data } = await api.get('/monitoring/search', { params: { q: query }, timeout: SEARCH_TIMEOUT_MS });
         if (!stale) setResults(data);
       } catch {
         // Tanpa ini kegagalan jaringan tampil sebagai "Pelanggan tidak ditemukan".
@@ -64,7 +67,7 @@ function SearchPanel({ onSelect }: { onSelect: (c: SearchResult) => void }) {
       }}>
         <Search size={16} style={{ color: 'var(--text-3)' }} />
         <input
-          autoFocus placeholder="Ketik nama pelanggan..."
+          autoFocus placeholder="Ketik nama, username / kode voucher, atau no. HP..."
           value={query} onChange={e => setQuery(e.target.value)}
           style={{
             flex: 1, background: 'transparent', border: 'none', outline: 'none',
@@ -135,30 +138,139 @@ function SearchPanel({ onSelect }: { onSelect: (c: SearchResult) => void }) {
   );
 }
 
+// ─── Notice (semua keadaan selain Online) ───────────────────────────────────
+const NOTICE_ICON: Record<Exclude<SessionState, 'online'>, LucideIcon> = {
+  offline: WifiOff,
+  disabled: Ban,
+  missing: SearchX,
+  unreachable: CloudOff,
+  unconfigured: CircleHelp,
+};
+
+function Notice({
+  data, onRetry, retrying, onSync, syncing,
+}: {
+  data: SessionResponse;
+  onRetry: () => void;
+  retrying: boolean;
+  onSync: () => void;
+  syncing: boolean;
+}) {
+  if (data.state === 'online') return null;
+  const look = lookOf(data.state, data.connectionType);
+  const Icon = NOTICE_ICON[data.state];
+  const isolated = data.state === 'disabled' && data.customerStatus === 'isolated';
+
+  return (
+    <div
+      role={data.state === 'unreachable' ? 'alert' : 'status'}
+      data-testid="session-notice"
+      data-state={data.state}
+      style={{
+        padding: '28px 20px', textAlign: 'center', background: 'var(--surface)',
+        borderRadius: 14, border: '1px solid var(--border)',
+      }}
+    >
+      <Icon size={28} aria-hidden="true" style={{ color: look.color, margin: '0 auto 10px' }} />
+      <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', marginBottom: 4 }}>{look.label}</p>
+      {data.reason && <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}>{data.reason}</p>}
+      {isolated && (
+        <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 6 }}>
+          Pelanggan berstatus isolir (tagihan belum lunas). Akun aktif lagi setelah tagihannya lunas.
+        </p>
+      )}
+      {data.mikrotikName && (
+        <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 10 }}>Mikrotik: {data.mikrotikName}</p>
+      )}
+
+      {data.state === 'missing' && data.canSync && (
+        <button
+          onClick={onSync}
+          disabled={syncing}
+          style={{
+            marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
+            borderRadius: 9, border: 'none', background: '#4F46E5', color: '#fff', fontFamily: 'inherit',
+            fontSize: 13, fontWeight: 600, cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.6 : 1,
+          }}
+        >
+          <DatabaseZap size={14} aria-hidden="true" /> {syncing ? 'Menyinkronkan...' : 'Sinkronkan ke router'}
+        </button>
+      )}
+      {data.state === 'unreachable' && (
+        <button
+          onClick={onRetry}
+          disabled={retrying}
+          style={{
+            marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
+            borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-1)',
+            fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: retrying ? 'not-allowed' : 'pointer',
+            opacity: retrying ? 0.6 : 1,
+          }}
+        >
+          <RefreshCw size={14} aria-hidden="true" style={retrying ? { animation: 'monSpin 0.7s linear infinite' } : undefined} />
+          Coba lagi
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Session Panel (PPPoE + Hotspot) ─────────────────────────────────────────
 function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: () => void }) {
-  const getSession   = useCustomerSession();
-  const kick         = useKickSession();
+  const kick = useKickSession();
 
-  const [sessionData, setSessionData]   = useState<SessionResponse | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const [view, setView] = useState<ViewState>(INITIAL_VIEW);
+  const [refreshing, setRefreshing] = useState(false);
+  // dipanggil dari tombol Muat ulang / Coba lagi / setelah sinkron; diisi oleh effect di bawah
+  const runCheck = useRef<(manual: boolean) => void>(() => undefined);
+  const sync = useSyncHotspot(() => runCheck.current(true));
 
-  // Fetch session pertama kali dan polling tiap 10 detik.
-  // (Trafik realtime punya polling sendiri di TrafficPanel, tiap 2 detik.)
+  // Cek sesi pertama kali, lalu tiap SESSION_POLL_MS. (Trafik realtime punya polling sendiri.)
   useEffect(() => {
-    const fetchSession = () => {
-      getSession.mutate(customer.id, {
-        onSuccess: setSessionData,
-      });
+    let stopped = false;
+    let inFlight = false; // jangan menumpuk permintaan bila router/server sedang lambat
+
+    setView(INITIAL_VIEW);
+
+    const run = async (manual: boolean) => {
+      if (inFlight || (!manual && document.hidden)) return;
+      inFlight = true;
+      setRefreshing(true);
+      try {
+        const res = await fetchCustomerSession(customer.id);
+        if (!stopped) setView((v) => applyResult(v, res, Date.now(), manual));
+      } catch {
+        // waktu habis / jaringan putus: jangan biarkan layar berputar selamanya
+        if (!stopped) setView((v) => applyResult(v, requestFailed({ customerName: customer.name, connectionType: customer.connectionType }), Date.now(), manual));
+      } finally {
+        inFlight = false;
+        if (!stopped) setRefreshing(false);
+      }
     };
 
-    fetchSession();
-    intervalRef.current = setInterval(fetchSession, 10_000);
-    return () => clearInterval(intervalRef.current);
-  }, [customer.id]);
+    runCheck.current = (manual) => void run(manual);
+    void run(false);
+    const id = setInterval(() => void run(false), SESSION_POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [customer]);
 
+  // Detik "diperbarui … lalu" hanya berdetak selama data yang tampil sedang basi.
+  const [, setTick] = useState(0);
+  const isStale = view.stale !== null;
+  useEffect(() => {
+    if (!isStale) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [isStale]);
+
+  const data      = view.shown;
   const isHotspot = customer.connectionType === 'hotspot';
-  const loading   = getSession.isPending && !sessionData;
+  const loading   = data === null;
+  const look      = data ? lookOf(data.state, data.connectionType) : null;
+  const staleSec  = view.stale && view.lastGood ? Math.max(0, Math.round((Date.now() - view.lastGood.at) / 1000)) : 0;
 
   return (
     <div style={{ width: '100%' }}>
@@ -184,26 +296,38 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
             {customer.name}
           </h2>
           <TypeBadge type={customer.connectionType} />
-          {sessionData && (
+          {look && (
             <span
-              title={sessionData.connected ? 'Online' : 'Offline'}
-              style={{
-                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                background: sessionData.connected ? '#10B981' : '#EF4444',
-              }}
+              data-testid="status-dot"
+              title={look.label}
+              style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: look.color }}
             />
           )}
         </div>
         <button
-          onClick={() => getSession.mutate(customer.id, { onSuccess: setSessionData })}
+          onClick={() => runCheck.current(true)}
           aria-label="Muat ulang sesi"
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4, flexShrink: 0 }}
         >
-          <RefreshCw size={14} style={getSession.isPending ? { animation: 'monSpin 0.7s linear infinite' } : {}} />
+          <RefreshCw size={14} style={refreshing ? { animation: 'monSpin 0.7s linear infinite' } : {}} />
         </button>
       </div>
 
-      {/* Loading */}
+      {/* Data lama masih ditampilkan karena pengecekan terbaru gagal */}
+      {view.stale && (
+        <p
+          role="status"
+          data-testid="stale-banner"
+          style={{
+            marginBottom: 12, padding: '8px 12px', borderRadius: 10, fontSize: 12, textAlign: 'center',
+            color: 'var(--text-2)', background: 'rgba(202,138,4,0.10)', border: '1px solid rgba(202,138,4,0.30)',
+          }}
+        >
+          Router belum merespons — menampilkan data dari {staleSec} detik lalu. Mencoba lagi otomatis.
+        </p>
+      )}
+
+      {/* Memuat pertama kali (dibatasi waktu: paling lama ±20 detik, lalu berganti pesan) */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>
           <RefreshCw size={24} style={{ animation: 'monSpin 0.7s linear infinite', margin: '0 auto 12px' }} />
@@ -211,44 +335,22 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
         </div>
       )}
 
-      {/* Not Found */}
-      {!loading && sessionData && !sessionData.found && (
-        <div style={{
-          padding: '28px 20px', textAlign: 'center', background: 'var(--surface)',
-          borderRadius: 14, border: '1px solid var(--border)',
-        }}>
-          <WifiOff size={28} style={{ color: 'var(--text-3)', margin: '0 auto 10px' }} />
-          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', marginBottom: 4 }}>
-            Perangkat tidak ditemukan
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{sessionData.reason}</p>
-        </div>
-      )}
-
-      {/* Offline */}
-      {!loading && sessionData?.found && !sessionData.connected && (
-        <div style={{
-          padding: '24px 20px', textAlign: 'center', background: 'var(--surface)',
-          borderRadius: 14, border: '1px solid var(--border)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', marginBottom: 8 }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#EF4444' }} />
-            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>Tidak Online</p>
-          </div>
-          <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>{sessionData.reason}</p>
-          {sessionData.mikrotikName && (
-            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
-              Mikrotik: {sessionData.mikrotikName}
-            </p>
-          )}
-        </div>
+      {/* Semua keadaan selain Online */}
+      {data && data.state !== 'online' && (
+        <Notice
+          data={data}
+          onRetry={() => runCheck.current(true)}
+          retrying={refreshing}
+          onSync={() => sync.mutate(customer.id)}
+          syncing={sync.isPending}
+        />
       )}
 
       {/* Online */}
-      {!loading && sessionData?.found && sessionData.connected && sessionData.session && (
+      {data && data.state === 'online' && data.session && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Info Sesi */}
-          <SessionInfoCard data={sessionData} isHotspot={isHotspot} />
+          <SessionInfoCard data={data} isHotspot={isHotspot} />
 
           {/* Traffic realtime (PPPoE saja) */}
           {!isHotspot && <TrafficPanel customerId={customer.id} />}
@@ -266,7 +368,7 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
 
           {/* Tombol Kick */}
           <button
-            onClick={() => kick.mutate(customer.id)}
+            onClick={() => kick.mutate(customer.id, { onSuccess: () => runCheck.current(true) })}
             disabled={kick.isPending}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
