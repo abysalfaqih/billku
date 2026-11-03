@@ -39,7 +39,9 @@ export function useUpdateMikrotik(onSuccess?: () => void) {
     },
     onError: (err: any) => {
       const msg = err?.response?.data?.message;
-      toast.error(Array.isArray(msg) ? msg[0] : (msg ?? 'Gagal memperbarui Mikrotik'));
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Gagal memperbarui Mikrotik');
+      // Penolakan ubah peran berisi penjelasan panjang — beri waktu cukup untuk dibaca.
+      toast.error(text, { duration: text.length > 80 ? 9000 : 4000 });
     },
   });
 }

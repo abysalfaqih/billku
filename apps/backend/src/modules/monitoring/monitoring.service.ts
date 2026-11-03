@@ -1,8 +1,8 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
-import { eq, and, like, or, sql } from 'drizzle-orm';
+import { eq, and, like, or, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { customers, packages, ipPools, mikrotikConfigs } from '../../database/schema';
+import { customers, packages, ipPools, mikrotikConfigs, ROUTER_ROLES, routerServesHotspot } from '../../database/schema';
 import { MikrotikService, describeMikrotikError } from '../mikrotik/mikrotik.service';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
@@ -170,28 +170,68 @@ export class MonitoringService {
     },
     tenantId: string,
   ) {
+    // Data lama: pelanggan hotspot yang belum punya router. Kalau tenant hanya
+    // punya SATU router hotspot aktif, itu pasti routernya — dipakai untuk
+    // PEMERIKSAAN saja (baca-saja) dan ditandai `assumedRouter` agar UI memberi
+    // petunjuk. Tidak ditulis ke data pelanggan, dan tombol Sinkronkan/Putuskan
+    // tetap tidak tersedia sampai admin memilih router di Edit Pelanggan.
+    let config: typeof mikrotikConfigs.$inferSelect | undefined;
+    let assumedRouter = false;
+
     if (!row.mikrotikConfigId) {
-      return this.result(row, 'unconfigured', {
-        reason: 'Router hotspot belum dipilih untuk pelanggan ini. Pilih di Edit Pelanggan.',
-      });
+      const candidates = await this.db
+        .select()
+        .from(mikrotikConfigs)
+        .where(and(
+          eq(mikrotikConfigs.tenantId, tenantId),
+          eq(mikrotikConfigs.isActive, true),
+          inArray(mikrotikConfigs.role, ROUTER_ROLES.filter(routerServesHotspot)),
+        ))
+        .limit(2);
+
+      if (candidates.length === 0) {
+        return this.result(row, 'unconfigured', {
+          reason: 'Belum ada router yang diatur untuk Hotspot. Atur peran router di halaman Mikrotik, lalu pilih router di Edit Pelanggan.',
+        });
+      }
+      if (candidates.length > 1) {
+        return this.result(row, 'unconfigured', {
+          reason: 'Router hotspot belum dipilih untuk pelanggan ini (ada lebih dari satu router hotspot). Pilih di Edit Pelanggan.',
+        });
+      }
+      config = candidates[0];
+      assumedRouter = true;
+    } else {
+      [config] = await this.db
+        .select()
+        .from(mikrotikConfigs)
+        .where(and(
+          eq(mikrotikConfigs.id, row.mikrotikConfigId),
+          eq(mikrotikConfigs.tenantId, tenantId),
+        ))
+        .limit(1);
+
+      if (!config) {
+        return this.result(row, 'unconfigured', {
+          reason: 'Router yang dipilih tidak ditemukan (mungkin sudah dihapus). Pilih ulang di Edit Pelanggan.',
+        });
+      }
+
+      if (!routerServesHotspot(config.role)) {
+        return this.result(row, 'unconfigured', {
+          mikrotikId: config.id,
+          mikrotikName: config.name,
+          reason: `Router '${config.name}' diatur khusus PPPoE, bukan Hotspot. Pilih router hotspot di Edit Pelanggan, atau ubah peran router di halaman Mikrotik.`,
+        });
+      }
     }
 
-    const [config] = await this.db
-      .select()
-      .from(mikrotikConfigs)
-      .where(and(
-        eq(mikrotikConfigs.id, row.mikrotikConfigId),
-        eq(mikrotikConfigs.tenantId, tenantId),
-      ))
-      .limit(1);
-
-    if (!config) {
-      return this.result(row, 'unconfigured', {
-        reason: 'Router yang dipilih tidak ditemukan (mungkin sudah dihapus). Pilih ulang di Edit Pelanggan.',
-      });
-    }
-
-    const where = { mikrotikId: config.id, mikrotikName: config.name, hotspotProfile: row.hotspotProfile };
+    const where = {
+      mikrotikId: config.id,
+      mikrotikName: config.name,
+      hotspotProfile: row.hotspotProfile,
+      ...(assumedRouter ? { assumedRouter: true } : {}),
+    };
     try {
       const info = await this.mikrotikService.inspectHotspotUser(config, row.usernamePppoe!);
 
@@ -208,7 +248,8 @@ export class MonitoringService {
         return this.result(row, 'missing', {
           ...where,
           reason: `Voucher '${row.usernamePppoe}' tidak ada di router '${config.name}'. Kemungkinan salah router atau terhapus.`,
-          canSync: row.status !== 'terminated' && !!row.passwordPppoe,
+          // Router hanya diasumsikan → belum boleh menulis ke router sampai dipilih di data pelanggan.
+          canSync: !assumedRouter && row.status !== 'terminated' && !!row.passwordPppoe,
         });
       }
 
@@ -280,6 +321,9 @@ export class MonitoringService {
       ))
       .limit(1);
     if (!config) return { success: false, reason: 'Router yang dipilih tidak ditemukan' };
+    if (!routerServesHotspot(config.role)) {
+      return { success: false, reason: `Router '${config.name}' diatur khusus PPPoE, bukan Hotspot. Pilih router hotspot di Edit Pelanggan.` };
+    }
 
     const disabled = row.status !== 'active';
     try {
@@ -330,7 +374,13 @@ export class MonitoringService {
             )).limit(1)
         : [null];
 
+      if (!row.mikrotikConfigId) {
+        return { success: false, reason: 'Router hotspot belum dipilih untuk pelanggan ini. Pilih di Edit Pelanggan.' };
+      }
       if (!config) return { success: false, reason: 'Mikrotik tidak ditemukan' };
+      if (!routerServesHotspot(config.role)) {
+        return { success: false, reason: `Router '${config.name}' diatur khusus PPPoE, bukan Hotspot. Pilih router hotspot di Edit Pelanggan.` };
+      }
 
       try {
         // Kick hotspot active session (bukan disable user)

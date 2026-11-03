@@ -8,7 +8,7 @@ import {
 import { eq, and } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { ipPools, mikrotikConfigs } from '../../database/schema';
+import { ipPools, mikrotikConfigs, routerServesPppoe } from '../../database/schema';
 import { MikrotikService } from '../mikrotik/mikrotik.service';
 import { RadiusService } from '../radius/radius.service';
 import { parseCidr, isValidCidr } from '../../common/utils/cidr.util';
@@ -53,6 +53,14 @@ export class IpPoolsService {
 
     if (!mikrotikConfig) {
       throw new NotFoundException('Konfigurasi Mikrotik tidak ditemukan');
+    }
+
+    // IP Pool dipakai PPPoE — router yang khusus Hotspot tidak boleh dipakai.
+    if (!routerServesPppoe(mikrotikConfig.role)) {
+      throw new BadRequestException(
+        `Router "${mikrotikConfig.name}" diatur khusus Hotspot, jadi tidak bisa dipakai untuk IP Pool PPPoE. ` +
+        'Pilih router lain, atau ubah peran router menjadi "PPPoE saja" / "Keduanya" di halaman Mikrotik.',
+      );
     }
 
     const dnsPrimary = dto.dnsPrimary ?? '8.8.8.8';

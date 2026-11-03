@@ -5,6 +5,7 @@ import { SelectInput } from '@/components/ui/select-input';
 import { Button } from '@/components/ui/button';
 import { useCreateIpPool } from '@/hooks/useIpPools';
 import { useMikrotikConfigs } from '@/hooks/useMikrotik';
+import { servesPppoe } from '@/lib/router-role';
 
 interface IpPoolFormProps {
   open: boolean;
@@ -30,9 +31,12 @@ export function IpPoolForm({ open, onClose }: IpPoolFormProps) {
     create.mutate({ ...form, mikrotikConfigId: Number(form.mikrotikConfigId) });
   };
 
-  const mikrotikOptions = (mikrotikConfigs ?? []).map((m) => ({
+  // IP Pool dipakai PPPoE: router yang khusus Hotspot tidak ditawarkan.
+  const pppoeRouters = (mikrotikConfigs ?? []).filter((m) => servesPppoe(m.role));
+  const mikrotikOptions = pppoeRouters.map((m) => ({
     value: m.id, label: `${m.name} (${m.host})`,
   }));
+  const noPppoeRouter = !!mikrotikConfigs && pppoeRouters.length === 0;
 
   return (
     <Dialog
@@ -51,7 +55,12 @@ export function IpPoolForm({ open, onClose }: IpPoolFormProps) {
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <SelectInput
           label="Mikrotik" value={form.mikrotikConfigId} onChange={set('mikrotikConfigId')}
-          options={mikrotikOptions} placeholder="Pilih router..." required
+          options={mikrotikOptions}
+          placeholder={noPppoeRouter ? 'Belum ada router PPPoE' : 'Pilih router...'}
+          required
+          hint={noPppoeRouter
+            ? 'Atur Peran router menjadi "PPPoE saja" atau "Keduanya" di menu Mikrotik.'
+            : 'Hanya router berperan PPPoE atau Keduanya yang ditampilkan.'}
         />
 
         <Input

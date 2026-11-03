@@ -1,0 +1,1 @@
+ALTER TABLE `mikrotik_configs` ADD `role` enum('pppoe','hotspot','both') DEFAULT 'both' NOT NULL;

@@ -138,6 +138,24 @@ function SearchPanel({ onSelect }: { onSelect: (c: SearchResult) => void }) {
   );
 }
 
+// ─── Petunjuk: pelanggan belum punya router, dicek di satu-satunya router hotspot ──
+function AssumedRouterHint({ data }: { data: SessionResponse }) {
+  if (!data.assumedRouter) return null;
+  return (
+    <p
+      data-testid="assumed-router-hint"
+      style={{
+        marginTop: 12, padding: '8px 12px', borderRadius: 10, fontSize: 12, lineHeight: 1.5, textAlign: 'center',
+        color: 'var(--text-2)', background: 'rgba(79,70,229,0.07)', border: '1px solid rgba(79,70,229,0.20)',
+      }}
+    >
+      Pelanggan ini belum memilih router, jadi dicek di satu-satunya router Hotspot
+      {data.mikrotikName ? ` (${data.mikrotikName})` : ''}. Pilih router di Edit Pelanggan agar tombol
+      Sinkronkan dan Putus Koneksi aktif.
+    </p>
+  );
+}
+
 // ─── Notice (semua keadaan selain Online) ───────────────────────────────────
 const NOTICE_ICON: Record<Exclude<SessionState, 'online'>, LucideIcon> = {
   offline: WifiOff,
@@ -182,6 +200,7 @@ function Notice({
       {data.mikrotikName && (
         <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 10 }}>Mikrotik: {data.mikrotikName}</p>
       )}
+      <AssumedRouterHint data={data} />
 
       {data.state === 'missing' && data.canSync && (
         <button
@@ -366,8 +385,10 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
             </div>
           )}
 
-          {/* Tombol Kick */}
-          <button
+          <AssumedRouterHint data={data} />
+
+          {/* Tombol Kick — tidak ada selama router hanya diasumsikan (backend butuh router di data pelanggan) */}
+          {!data.assumedRouter && <button
             onClick={() => kick.mutate(customer.id, { onSuccess: () => runCheck.current(true) })}
             disabled={kick.isPending}
             style={{
@@ -379,7 +400,7 @@ function SessionPanel({ customer, onBack }: { customer: SearchResult; onBack: ()
             }}
           >
             <Power size={14} /> Putus Koneksi Sekarang
-          </button>
+          </button>}
         </div>
       )}
 

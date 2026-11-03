@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { SelectInput } from '@/components/ui/select-input';
 import { Button } from '@/components/ui/button';
 import { useCreateMikrotik, useUpdateMikrotik } from '@/hooks/useMikrotik';
-import type { MikrotikConfig } from '@/types';
+import { ROUTER_ROLE_OPTIONS } from '@/lib/router-role';
+import type { MikrotikConfig, RouterRole } from '@/types';
 
 interface MikrotikFormProps {
   open: boolean;
@@ -11,7 +13,7 @@ interface MikrotikFormProps {
   config?: MikrotikConfig | null;
 }
 
-const INIT = { name: '', host: '', port: '8728', username: '', password: '', radiusSecret: '' };
+const INIT = { name: '', host: '', port: '8728', username: '', password: '', radiusSecret: '', role: 'both' as RouterRole };
 
 export function MikrotikForm({ open, onClose, config }: MikrotikFormProps) {
   const [form, setForm] = useState(INIT);
@@ -28,6 +30,7 @@ export function MikrotikForm({ open, onClose, config }: MikrotikFormProps) {
         username: config.username,
         password: '',
         radiusSecret: '',
+        role: config.role ?? 'both',
       });
     } else {
       setForm(INIT);
@@ -35,7 +38,8 @@ export function MikrotikForm({ open, onClose, config }: MikrotikFormProps) {
   }, [config, open]);
 
   const set = (k: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement>) => setForm((p) => ({ ...p, [k]: e.target.value }));
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm((p) => ({ ...p, [k]: e.target.value }));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +50,7 @@ export function MikrotikForm({ open, onClose, config }: MikrotikFormProps) {
         host: form.host,
         port: Number(form.port),
         username: form.username,
+        role: form.role,
       };
       if (form.password) payload.password = form.password; // kosong = tidak diubah
       if (form.radiusSecret) payload.radiusSecret = form.radiusSecret; // kosong = tidak diubah
@@ -100,6 +105,12 @@ export function MikrotikForm({ open, onClose, config }: MikrotikFormProps) {
           type="password"
           placeholder={isEdit ? 'Kosongkan jika tidak diubah' : '••••••••'}
           value={form.password} onChange={set('password')} required={!isEdit} autoComplete="new-password"
+        />
+
+        <SelectInput
+          label="Peran Router" value={form.role} onChange={set('role')}
+          options={ROUTER_ROLE_OPTIONS}
+          hint="PPPoE saja: hanya untuk IP Pool. Hotspot saja: hanya untuk voucher/pelanggan hotspot. Pilih Keduanya bila satu router melayani dua-duanya."
         />
 
         <div style={{

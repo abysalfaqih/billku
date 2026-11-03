@@ -35,6 +35,8 @@ export interface SessionResponse {
   errorKind?: string;
   /** akun hotspot hilang dari router dan boleh dibuat ulang lewat tombol Sinkronkan */
   canSync?: boolean;
+  /** pelanggan belum punya router; dicek di satu-satunya router hotspot (hanya baca) */
+  assumedRouter?: boolean;
   session?: SessionInfo;
   /** semua sesi aktif (hotspot yang dipakai di lebih dari satu perangkat) */
   sessions?: SessionInfo[];

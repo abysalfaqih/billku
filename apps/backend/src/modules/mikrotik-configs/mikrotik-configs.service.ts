@@ -4,16 +4,26 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { eq, and, count } from 'drizzle-orm';
+import { eq, and, ne, count } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { mikrotikConfigs, ipPools } from '../../database/schema';
+import {
+  mikrotikConfigs, ipPools, customers,
+  routerServesHotspot, routerServesPppoe,
+} from '../../database/schema';
+import type { RouterRole } from '../../database/schema';
 import { MikrotikService } from '../mikrotik/mikrotik.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { RadiusService } from '../radius/radius.service';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import type { CreateMikrotikConfigDto } from './dto/create-mikrotik-config.dto';
 import type { UpdateMikrotikConfigDto } from './dto/update-mikrotik-config.dto';
+
+const ROLE_LABEL: Record<RouterRole, string> = {
+  pppoe: 'PPPoE saja',
+  hotspot: 'Hotspot saja',
+  both: 'Keduanya',
+};
 
 @Injectable()
 export class MikrotikConfigsService {
@@ -38,6 +48,7 @@ export class MikrotikConfigsService {
       username: dto.username,
       password: dto.password,
       radiusSecret: dto.radiusSecret,
+      role: dto.role ?? 'both',
     });
 
     const config = await this.findOne(Number(result.insertId), user);
@@ -46,17 +57,26 @@ export class MikrotikConfigsService {
   }
 
   // Dipanggil siapa saja yang login (termasuk staff, buat dropdown). Makanya
-  // cuma field aman yang dikirim — password/username/radiusSecret TIDAK ikut.
-  // Detail lengkap cuma lewat findOne(), yang sudah dikunci admin-only.
+  // staff hanya menerima field aman (id, nama, host, peran). Admin juga
+  // menerima port, username & status aktif — itu yang dibutuhkan halaman
+  // Mikrotik untuk menampilkan dan mengedit router. Password dan RADIUS secret
+  // TIDAK PERNAH ikut; detail lengkap cuma lewat findOne() yang admin-only.
   async findAll(user: AuthUser) {
-    return this.db
+    const rows = await this.db
       .select({
         id: mikrotikConfigs.id,
         name: mikrotikConfigs.name,
         host: mikrotikConfigs.host,
+        role: mikrotikConfigs.role,
+        port: mikrotikConfigs.port,
+        username: mikrotikConfigs.username,
+        isActive: mikrotikConfigs.isActive,
       })
       .from(mikrotikConfigs)
       .where(and(eq(mikrotikConfigs.tenantId, user.tenantId), eq(mikrotikConfigs.isActive, true)));
+
+    if (user.role === 'super_admin' || user.role === 'admin') return rows;
+    return rows.map(({ id, name, host, role }) => ({ id, name, host, role }));
   }
 
   async findOne(id: number, user: AuthUser) {
@@ -72,6 +92,13 @@ export class MikrotikConfigsService {
   async update(id: number, dto: UpdateMikrotikConfigDto, user: AuthUser) {
     const existing = await this.findOne(id, user);
 
+    // Peran tidak boleh dipersempit selagi masih ada yang memakai — kalau
+    // dibiarkan, pelanggan/IP Pool yang sudah ada akan menunjuk router yang
+    // "bukan perannya" dan monitoring/sinkron ke router jadi membingungkan.
+    if (dto.role !== undefined && dto.role !== existing.role) {
+      await this.assertRoleChangeAllowed(existing.id, user.tenantId, dto.role);
+    }
+
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (dto.name !== undefined) updateData.name = dto.name;
     if (dto.host !== undefined) updateData.host = dto.host;
@@ -79,6 +106,7 @@ export class MikrotikConfigsService {
     if (dto.username !== undefined) updateData.username = dto.username;
     if (dto.password) updateData.password = dto.password; // kosong = password tidak diubah
     if (dto.radiusSecret) updateData.radiusSecret = dto.radiusSecret; // kosong = secret tidak diubah
+    if (dto.role !== undefined) updateData.role = dto.role;
 
     await this.db
       .update(mikrotikConfigs)
@@ -127,6 +155,45 @@ export class MikrotikConfigsService {
     } catch (err) {
       throw new NotFoundException(
         `Gagal ambil hotspot profile: ${err.message}. Pastikan Mikrotik punya fitur Hotspot aktif.`
+      );
+    }
+  }
+
+  // Menolak perubahan peran kalau router masih dipakai oleh sesuatu yang
+  // perannya akan hilang. Hitungannya per tenant; pelanggan terminated tidak
+  // dihitung (sudah berhenti berlangganan, tidak boleh mengunci router).
+  private async assertRoleChangeAllowed(id: number, tenantId: string, newRole: RouterRole) {
+    const problems: string[] = [];
+
+    if (!routerServesHotspot(newRole)) {
+      const [{ total }] = await this.db
+        .select({ total: count() })
+        .from(customers)
+        .where(and(
+          eq(customers.tenantId, tenantId),
+          eq(customers.mikrotikConfigId, id),
+          eq(customers.connectionType, 'hotspot'),
+          ne(customers.status, 'terminated'),
+        ));
+      if (total > 0) problems.push(`${total} pelanggan hotspot masih memakai router ini`);
+    }
+
+    if (!routerServesPppoe(newRole)) {
+      const [{ total }] = await this.db
+        .select({ total: count() })
+        .from(ipPools)
+        .where(and(
+          eq(ipPools.tenantId, tenantId),
+          eq(ipPools.mikrotikConfigId, id),
+          eq(ipPools.isActive, true),
+        ));
+      if (total > 0) problems.push(`${total} IP Pool PPPoE masih memakai router ini`);
+    }
+
+    if (problems.length > 0) {
+      throw new ConflictException(
+        `Peran tidak bisa diubah ke "${ROLE_LABEL[newRole]}": ${problems.join(' dan ')}. ` +
+        'Pindahkan dulu ke router lain, atau pilih peran "Keduanya".',
       );
     }
   }

@@ -6,8 +6,18 @@ import {
   boolean,
   timestamp,
   index,
+  mysqlEnum,
 } from 'drizzle-orm/mysql-core';
 import { tenants } from './tenants.schema';
+
+// Peran router. 'both' = melayani PPPoE sekaligus Hotspot (default, sama seperti
+// perilaku sebelum kolom ini ada — jadi router lama tidak berubah sampai admin
+// mengaturnya sendiri).
+export const ROUTER_ROLES = ['pppoe', 'hotspot', 'both'] as const;
+export type RouterRole = (typeof ROUTER_ROLES)[number];
+
+export const routerServesPppoe = (role: RouterRole) => role === 'pppoe' || role === 'both';
+export const routerServesHotspot = (role: RouterRole) => role === 'hotspot' || role === 'both';
 
 export const mikrotikConfigs = mysqlTable(
   'mikrotik_configs',
@@ -27,6 +37,9 @@ export const mikrotikConfigs = mysqlTable(
 
     // Secret yang sama dikonfigurasi di Mikrotik → Radius → server secret
     radiusSecret: varchar('radius_secret', { length: 255 }).notNull(),
+
+    // Router ini dipakai untuk apa: PPPoE, Hotspot, atau keduanya.
+    role: mysqlEnum('role', ROUTER_ROLES).notNull().default('both'),
 
     isActive: boolean('is_active').notNull().default(true),
 

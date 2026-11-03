@@ -5,8 +5,12 @@ import {
   Min,
   Max,
   IsIP,
+  IsIn,
+  IsOptional,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ROUTER_ROLES } from '../../../database/schema';
+import type { RouterRole } from '../../../database/schema';
 
 export class CreateMikrotikConfigDto {
   @IsString()
@@ -33,4 +37,10 @@ export class CreateMikrotikConfigDto {
   @IsString()
   @IsNotEmpty()
   radiusSecret: string;
+
+  // Peran router: 'pppoe' | 'hotspot' | 'both'. Tidak dikirim = 'both'
+  // (saat membuat) atau tidak diubah (saat mengedit).
+  @IsOptional()
+  @IsIn(ROUTER_ROLES, { message: 'Peran router harus pppoe, hotspot, atau both' })
+  role?: RouterRole;
 }

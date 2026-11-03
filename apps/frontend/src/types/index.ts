@@ -155,6 +155,9 @@ export interface PaginatedResponse<T> {
   };
 }
 
+// Peran router: dipakai untuk PPPoE, Hotspot, atau keduanya (default untuk router lama).
+export type RouterRole = 'pppoe' | 'hotspot' | 'both';
+
 export interface MikrotikConfig {
   id: number;
   tenantId: string;
@@ -163,6 +166,7 @@ export interface MikrotikConfig {
   port: number;
   username: string;
   radiusSecret: string;
+  role: RouterRole;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

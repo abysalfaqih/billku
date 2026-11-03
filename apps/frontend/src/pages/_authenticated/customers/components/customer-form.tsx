@@ -10,6 +10,7 @@ import { usePackages } from '@/hooks/usePackages';
 import { useAreas } from '@/hooks/useAreas';
 import { useMikrotikConfigs, useHotspotProfiles } from '@/hooks/useMikrotik';
 import { useCreateCustomer, useUpdateCustomer } from '@/hooks/useCustomers';
+import { servesHotspot } from '@/lib/router-role';
 import type { Customer } from '@/types';
 
 interface Props {
@@ -49,6 +50,7 @@ export function CustomerForm({ open, onClose, customer }: Props) {
 
   const create = useCreateCustomer(onClose);
   const update = useUpdateCustomer(onClose);
+  const [routerNotice, setRouterNotice] = useState('');
 
   const mikrotikId   = form.connectionType === 'hotspot' && form.mikrotikConfigId
     ? Number(form.mikrotikConfigId) : null;
@@ -56,6 +58,7 @@ export function CustomerForm({ open, onClose, customer }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    setRouterNotice('');
     if (customer) {
       setForm({
         connectionType: customer.connectionType ?? 'pppoe',
@@ -88,6 +91,24 @@ export function CustomerForm({ open, onClose, customer }: Props) {
       setForm((p) => ({ ...p, [k]: e.target.value }));
 
   const isHotspot = form.connectionType === 'hotspot';
+
+  // Pelanggan hotspot hanya boleh memakai router berperan Hotspot/Keduanya.
+  // Satu-satunya router hotspot dipilih otomatis; pilihan lama yang sudah tidak
+  // cocok (router khusus PPPoE / sudah nonaktif) dikosongkan agar admin memilih ulang.
+  useEffect(() => {
+    if (!open || !isHotspot || !mtkList) return;
+    const hotspotRouters = mtkList.filter((m) => servesHotspot(m.role));
+    const current = String(form.mikrotikConfigId);
+    if (current && !hotspotRouters.some((m) => String(m.id) === current)) {
+      const old = mtkList.find((m) => String(m.id) === current);
+      setRouterNotice(old
+        ? `Router "${old.name}" khusus PPPoE — pilih router Hotspot.`
+        : 'Router sebelumnya sudah tidak tersedia — pilih router Hotspot.');
+      setForm((p) => ({ ...p, mikrotikConfigId: '', hotspotProfile: '' }));
+    } else if (!current && hotspotRouters.length === 1) {
+      setForm((p) => ({ ...p, mikrotikConfigId: String(hotspotRouters[0].id), hotspotProfile: '' }));
+    }
+  }, [open, isHotspot, mtkList, form.mikrotikConfigId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,7 +151,8 @@ export function CustomerForm({ open, onClose, customer }: Props) {
     value: p.id, label: `${p.name} — Rp${Number(p.price).toLocaleString('id-ID')}`,
   }));
   const areaOptions     = (areas ?? []).map((a) => ({ value: a.id, label: a.name }));
-  const mtkOptions      = (mtkList ?? []).map((m) => ({ value: m.id, label: `${m.name} (${m.host})` }));
+  const hotspotRouters  = (mtkList ?? []).filter((m) => servesHotspot(m.role));
+  const mtkOptions      = hotspotRouters.map((m) => ({ value: m.id, label: `${m.name} (${m.host})` }));
   const profileOptions  = (hotspotProfiles ?? []).map((p) => ({ value: p, label: p }));
   const billingOptions  = Array.from({ length: 28 }, (_, i) => ({ value: i + 1, label: `Tanggal ${i + 1}` }));
   const statusOptions   = [
@@ -217,9 +239,16 @@ export function CustomerForm({ open, onClose, customer }: Props) {
               value={String(form.mikrotikConfigId)}
               onChange={(e) => setForm(p => ({ ...p, mikrotikConfigId: e.target.value, hotspotProfile: '' }))}
               options={mtkOptions}
-              placeholder={mtkList?.length ? 'Pilih Mikrotik...' : 'Belum ada Mikrotik — tambahkan dulu'}
+              placeholder={hotspotRouters.length ? 'Pilih Mikrotik...' : 'Belum ada router Hotspot'}
               required
-              hint="Router Mikrotik yang menjalankan layanan Hotspot"
+              error={!form.mikrotikConfigId && routerNotice ? routerNotice : undefined}
+              hint={
+                !hotspotRouters.length
+                  ? 'Tambahkan router, atau atur Peran router menjadi "Hotspot saja" / "Keduanya" di menu Mikrotik.'
+                  : hotspotRouters.length === 1
+                    ? 'Satu-satunya router Hotspot — dipilih otomatis'
+                    : 'Hanya router berperan Hotspot atau Keduanya yang ditampilkan'
+              }
             />
 
             {/* Profile Hotspot — auto-load dari Mikrotik */}

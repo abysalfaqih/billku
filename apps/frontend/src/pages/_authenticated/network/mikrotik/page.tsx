@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { QueryError } from '@/components/ui/query-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Spinner } from '@/components/ui/spinner';
+import { Badge } from '@/components/ui/badge';
+import { ROUTER_ROLE_LABEL } from '@/lib/router-role';
 import { MikrotikForm } from './components/mikrotik-form';
 import { useMikrotikConfigs, useTestMikrotik, useDeleteMikrotik } from '@/hooks/useMikrotik';
 import type { MikrotikConfig } from '@/types';
@@ -63,8 +65,13 @@ function MikrotikCard({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
         <span>User: <strong style={{ color: 'var(--text-2)' }}>{config.username}</strong></span>
+        <span data-testid="router-role-badge" data-role={config.role ?? 'both'}>
+          <Badge variant={config.role === 'pppoe' ? 'info' : config.role === 'hotspot' ? 'warning' : 'default'}>
+            {ROUTER_ROLE_LABEL[config.role ?? 'both']}
+          </Badge>
+        </span>
       </div>
 
       <Button

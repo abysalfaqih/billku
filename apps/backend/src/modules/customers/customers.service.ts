@@ -5,7 +5,7 @@ import { eq, and, like, or, count, desc, isNotNull, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { DRIZZLE } from '../../database/database.module';
 import type { DrizzleClient } from '../../database/database.module';
-import { customers, packages, ipPools, mikrotikConfigs, areas, bills, payments, whatsappLogs, customerCodeCounters } from '../../database/schema';
+import { customers, packages, ipPools, mikrotikConfigs, areas, bills, payments, whatsappLogs, customerCodeCounters, routerServesHotspot } from '../../database/schema';
 import { RadiusService } from '../radius/radius.service';
 import { MikrotikService } from '../mikrotik/mikrotik.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -34,7 +34,14 @@ export class CustomersService {
   async create(dto: CreateCustomerDto, user: AuthUser) {
     await this.validatePackageBelongsToTenant(dto.packageId, user.tenantId);
     await this.validateAreaBelongsToTenant(dto.areaId, user.tenantId);
-    if (dto.mikrotikConfigId) await this.validateMikrotikConfigBelongsToTenant(dto.mikrotikConfigId, user.tenantId);
+    if (dto.connectionType === 'hotspot') {
+      if (!dto.mikrotikConfigId) {
+        throw new BadRequestException('Pelanggan hotspot harus memilih router Mikrotik');
+      }
+      await this.validateHotspotRouter(dto.mikrotikConfigId, user.tenantId);
+    } else if (dto.mikrotikConfigId) {
+      await this.validateMikrotikConfigBelongsToTenant(dto.mikrotikConfigId, user.tenantId);
+    }
     if (dto.usernamePppoe) await this.ensurePppoeUnique(dto.usernamePppoe);
 
     const customerCode = await this.generateCustomerCode(user.tenantId);
@@ -210,8 +217,16 @@ export class CustomersService {
     // tetap bisa diedit. Pencarian config di bawah (getHotspotMikrotikConfig)
     // sudah dikunci per tenant, jadi nilai lama yang janggal tidak bisa dipakai
     // untuk menyentuh router tenant lain.
-    if (dto.mikrotikConfigId && dto.mikrotikConfigId !== existing.mikrotikConfigId) {
-      await this.validateMikrotikConfigBelongsToTenant(dto.mikrotikConfigId, user.tenantId);
+    const routerChanged = !!dto.mikrotikConfigId && dto.mikrotikConfigId !== existing.mikrotikConfigId;
+    const becomesHotspot = dto.connectionType === 'hotspot' && existing.connectionType !== 'hotspot';
+    const isHotspot = (dto.connectionType ?? existing.connectionType) === 'hotspot';
+    if (isHotspot && (routerChanged || becomesHotspot)) {
+      // Router baru / pelanggan baru pindah ke hotspot: harus router hotspot.
+      const routerId = dto.mikrotikConfigId ?? existing.mikrotikConfigId;
+      if (!routerId) throw new BadRequestException('Pelanggan hotspot harus memilih router Mikrotik');
+      await this.validateHotspotRouter(routerId, user.tenantId);
+    } else if (routerChanged) {
+      await this.validateMikrotikConfigBelongsToTenant(dto.mikrotikConfigId!, user.tenantId);
     }
     if (dto.usernamePppoe && dto.usernamePppoe !== existing.usernamePppoe) {
       await this.ensurePppoeUnique(dto.usernamePppoe, id);
@@ -715,6 +730,23 @@ export class CustomersService {
       .where(and(eq(mikrotikConfigs.id, mikrotikConfigId), eq(mikrotikConfigs.tenantId, tenantId)))
       .limit(1);
     if (!config) throw new NotFoundException('Konfigurasi Mikrotik tidak ditemukan');
+  }
+
+  // Router untuk pelanggan hotspot: milik tenant ini dan perannya hotspot/both.
+  // Router berperan "pppoe" ditolak — voucher/akun hotspot tidak ada di sana.
+  private async validateHotspotRouter(mikrotikConfigId: number, tenantId: string) {
+    const [config] = await this.db
+      .select({ id: mikrotikConfigs.id, name: mikrotikConfigs.name, role: mikrotikConfigs.role })
+      .from(mikrotikConfigs)
+      .where(and(eq(mikrotikConfigs.id, mikrotikConfigId), eq(mikrotikConfigs.tenantId, tenantId)))
+      .limit(1);
+    if (!config) throw new NotFoundException('Konfigurasi Mikrotik tidak ditemukan');
+    if (!routerServesHotspot(config.role)) {
+      throw new BadRequestException(
+        `Router "${config.name}" diatur khusus PPPoE, jadi tidak bisa dipakai untuk pelanggan hotspot. ` +
+        'Pilih router hotspot, atau ubah peran router di halaman Mikrotik.',
+      );
+    }
   }
 
   private async validateAreaBelongsToTenant(areaId: number, tenantId: string) {
